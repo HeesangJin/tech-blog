@@ -1,0 +1,69 @@
+site_name: 기술 기록
+site_url: https://heesangjin.github.io/tech-blog/
+repo_url: https://github.com/HeesangJin/tech-blog
+repo_name: HeesangJin/tech-blog
+edit_uri: edit/main/docs/
+site_description: 직접 만들고 운영하며 배운 것을 기록하는 개인 기술 블로그
+use_directory_urls: true
+
+theme:
+  name: material
+  language: ko
+  font: false
+  icon:
+    logo: material/notebook-outline
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: 어두운 화면으로 전환
+    - scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: 밝은 화면으로 전환
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search:
+      lang:
+        - ko
+        - en
+
+nav:
+  - 홈: index.md
+  - MLOps:
+      - mlops/index.md
+      - "MLOps 실습: 학습부터 추론까지 연결하기": mlops/azure-mlops-lab.md
+  - 소개: about.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra_css:
+  - stylesheets/extra.css

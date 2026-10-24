@@ -1,0 +1,21 @@
+.venv/
+site/
+__pycache__/
+.DS_Store
+
+# Private/local configuration and generated files
+.env
+.env.*
+!.env.example
+.secrets/
+.aws/
+.azure/
+*.pem
+*.key
+*.p12
+*.pfx
+*.kubeconfig
+kubeconfig
+reports/
+.audit/
+*.log

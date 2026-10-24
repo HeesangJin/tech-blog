@@ -1,0 +1,13 @@
+/* 시스템 글꼴을 사용해 별도 웹 폰트 요청 없이 한국어 본문을 읽습니다. */
+:root {
+  --md-text-font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --md-code-font: "SFMono-Regular", Consolas, monospace;
+}
+.md-typeset { line-height: 1.85; }
+.md-typeset h1, .md-typeset h2, .md-typeset h3 { font-weight: 700; }
+.md-typeset img { border-radius: 8px; }
+.md-typeset .admonition { line-height: 1.75; }
+
+.md-typeset figure { margin: 1.5em 0 2em; }
+.md-typeset figure img { border: 1px solid var(--md-default-fg-color--lightest); }
+.md-typeset figcaption { font-size: .78rem; line-height: 1.6; color: var(--md-default-fg-color--light); max-width: 100%; }
