@@ -15,18 +15,6 @@ python -m mkdocs serve --dev-addr 127.0.0.1:8000
 브라우저에서 http://127.0.0.1:8000 을 엽니다.
 빌드 검사는 `python -m mkdocs build --strict`로 실행합니다.
 
-## 배포 준비
-
-GitHub 저장소 생성과 공개 배포는 아직 완료되지 않았습니다.
-아래 주소는 배포 예정 주소입니다.
-
-```bash
-gh repo create HeesangJin/tech-blog --public --description "개인 기술 블로그"
-git push -u origin main
-gh api --method POST repos/HeesangJin/tech-blog/pages -f build_type=workflow
-gh workflow run deploy.yml --repo HeesangJin/tech-blog --ref main
-```
-
 ## GitHub Pages
 
 - 블로그: https://heesangjin.github.io/tech-blog/
