@@ -4,6 +4,51 @@ date: 2026-10-25
 tags: [MLOps, Azure, MLflow, Feast, Kubeflow]
 ---
 
+## 개발 흐름과 이 글의 지도 {#reading-map}
+
+각 행을 **왼쪽부터 ‘개발자가 하는 일 → MLOps에서의 의미 → 이 글에서 읽을 부분’**으로 보면 된다.
+위에서 아래로 실습을 따라가고, 결과에서 문제를 찾으면 다시 실험으로 돌아간다.
+
+```mermaid
+flowchart TB
+    accTitle: ML 개발 업무와 MLOps 라이프사이클에 맞춘 문서 읽기 순서
+    accDescr: 준비, 실험, 반복 실행, 배치 추론, 검증과 개선의 순서로 개발 업무와 문서의 해당 부분을 연결한다.
+    subgraph S0["0 · 목표와 실행 기반"]
+        direction LR
+        W0["하는 일<br/>예측 목표·데이터 확인<br/>실행 환경 준비"] --> L0["라이프사이클<br/>문제 정의·데이터 준비"] --> T0["읽을 부분<br/>실습 배경 → MLOps 개념<br/>→ 환경과 구성도"]
+    end
+    subgraph S1["1 · 노트북에서 실험"]
+        direction LR
+        W1["하는 일<br/>데이터 탐색·전처리<br/>학습·점수 비교"] --> L1["라이프사이클<br/>실험·학습·평가"] --> T1["본문 1<br/>JupyterLab에서 실행<br/>MLflow에 기록·비교"]
+    end
+    subgraph S2["2 · 반복 가능한 작업으로 연결"]
+        direction LR
+        W2["하는 일<br/>코드를 함수로 분리<br/>입력·출력·순서 정의"] --> L2["라이프사이클 전반<br/>실험과 추론의<br/>반복 실행 체계화"] --> T2["본문 2<br/>KFP 코드 → DAG<br/>→ 작업 Pod 실행"]
+    end
+    subgraph S3["3 · 선택한 모델로 예측"]
+        direction LR
+        W3["하는 일<br/>사용자 피처 조회<br/>저장한 모델로 예측"] --> L3["라이프사이클<br/>추론 입력 준비<br/>배치 추론"] --> T3["본문 3·4<br/>Feast 조회 → 모델 로드<br/>→ 예측 결과 저장"]
+    end
+    subgraph S4["4 · 결과 확인과 개선"]
+        direction LR
+        W4["하는 일<br/>입력·예측 검증<br/>원인 수정·다음 실험"] --> L4["라이프사이클<br/>검증·피드백·개선<br/>→ 1단계 실험으로"] --> T4["마무리<br/>공백 오류 해결<br/>→ 결론·개선 계획"]
+    end
+    S0 --> S1 --> S2 --> S3 --> S4
+    S4 -.-> Future["향후 확장<br/>운영 API · 모니터링 · 자동 재학습"]
+    classDef work fill:#e8f5e9,stroke:#66a880,color:#163d2b
+    classDef lifecycle fill:#e8f0fe,stroke:#7699cc,color:#20385a
+    classDef reading fill:#fff4db,stroke:#c9a45c,color:#543e14
+    classDef future fill:#f3f4f6,stroke:#9ca3af,color:#4b5563,stroke-dasharray:5 5
+    class W0,W1,W2,W3,W4 work
+    class L0,L1,L2,L3,L4 lifecycle
+    class T0,T1,T2,T3,T4 reading
+    class Future future
+```
+
+MLflow 기록은 실험·학습·추론에 걸쳐 남기고, Kubeflow는 정해진 작업의 실행을 관리한다.
+그림의 ‘반복 실행’은 별도의 필수 생애주기 단계라기보다 여러 단계를 다시 수행하기 위한 공통 기반이다.
+
+
 ## 왜 이 실습을 했나
 
 『Machine Learning Platform Engineering』을 읽으면서 궁금했던 것은 **“학습한 모델을 어떻게 반복해서 실행하고 운영할까?”**였다.
@@ -26,17 +71,6 @@ tags: [MLOps, Azure, MLflow, Feast, Kubeflow]
 **MLOps는 모델 개발과 운영을 연결하고, 데이터·코드·모델의 변경을 추적하며 실행·검증을 반복 가능하게 만드는 방법과 체계다.**
 코드가 같아도 학습 데이터가 달라지면 모델이 달라지고, 운영 입력의 변화로 성능이 떨어질 수 있다.
 그래서 MLOps는 DevOps의 빌드·배포에 더해 **데이터·모델·실험과 예측 품질**까지 관리한다.
-
-ML 개발자가 수행하는 일을 라이프사이클과 도구로 연결하면 다음과 같다.
-
-| 단계 | 개발자가 하는 일 | 이번 실습의 실행·기록 방식 |
-|---|---|---|
-| 문제·데이터 준비 | 예측 대상과 평가 기준을 정하고 데이터를 준비 | 소득 분류 목표, 원본 CSV·피처 파일 확인 |
-| 탐색·실험 | 표·그래프로 데이터 확인, 전처리와 모델 설정 변경 | JupyterLab에서 셀 실행, MLflow에 분석 산출물 기록 |
-| 학습·평가 | 모델을 학습하고 같은 기준으로 비교·선택 | 노트북 또는 KFP 작업 Pod에서 실행, MLflow에 설정·점수·모델 기록 |
-| 반복 실행 | 검증한 코드를 작업으로 나누고 입력·순서 고정 | KFP SDK로 DAG 정의, Kubeflow에서 재실행 |
-| 배포·추론 | 선택한 모델과 새 입력을 연결해 예측 | Feast 피처 조회 → SeaweedFS 모델 로드 → 배치 추론 |
-| 관측·개선 | 오류·데이터 변화·품질 저하를 찾아 개선 | 이번에는 입력 공백 오류까지 확인. 운영 모니터링·자동 재학습은 다음 과제 |
 
 **JupyterLab은 실험하는 작업 공간, MLflow는 실행과 모델의 기록 체계, Kubeflow Pipelines는 작업의 실행 순서와 상태를 관리하는 체계**다.
 개발자가 셀을 실행하며 확인한 과정을 파이프라인으로 옮겨도, 학습·평가 로직과 MLflow 기록 코드는 재사용할 수 있다.
