@@ -139,14 +139,14 @@ def pipeline(requests_bucket: str, requests_key: str,
 파이프라인 함수는 컴파일 시 그래프를 만든다. 실행 시 핵심 코드는 각 작업 Pod에서 돈다.
 재실행은 **Clone run → 파라미터 확인 → Start**. Pod의 기록 코드는 계속 MLflow를 사용한다.
 
-??? example "학습 파이프라인의 비교 리포트"
+**학습 파이프라인의 비교 리포트**
 
-    <figure class="lab-shot" markdown="span">
+<figure class="lab-shot" markdown="span">
 
-    [![KFP 산출물 · 세 모델의 평가 결과와 MLflow Run 링크](assets/kubeflow-training-report.png)](assets/kubeflow-training-report.png)
+[![KFP 산출물 · 세 모델의 평가 결과와 MLflow Run 링크](assets/kubeflow-training-report.png)](assets/kubeflow-training-report.png)
 
-    <figcaption>KFP 산출물 · 세 모델의 평가 결과와 MLflow Run 링크</figcaption>
-    </figure>
+<figcaption>KFP 산출물 · 세 모델의 평가 결과와 MLflow Run 링크</figcaption>
+</figure>
 
 ## ③ 피처와 모델 준비하기 {#3-feast}
 
@@ -185,21 +185,21 @@ with tempfile.TemporaryDirectory() as temporary:
 <figcaption>SeaweedFS · model.pkl, MLmodel, 실행 환경 파일</figcaption>
 </figure>
 
-??? example "피처 파일과 모델의 학습 출처"
+**피처 파일과 모델의 학습 출처**
 
-    <figure class="lab-shot" markdown="span">
+<figure class="lab-shot" markdown="span">
 
-    [![원본 Parquet 파일 3개](assets/seaweedfs-feature-files.png)](assets/seaweedfs-feature-files.png)
+[![원본 Parquet 파일 3개](assets/seaweedfs-feature-files.png)](assets/seaweedfs-feature-files.png)
 
-    <figcaption>원본 Parquet 파일 3개</figcaption>
-    </figure>
+<figcaption>원본 Parquet 파일 3개</figcaption>
+</figure>
 
-    <figure class="lab-shot" markdown="span">
+<figure class="lab-shot" markdown="span">
 
-    [![MLflow Source run · 이 모델을 만든 학습 실행](assets/mlflow-trained-model.png)](assets/mlflow-trained-model.png)
+[![MLflow Source run · 이 모델을 만든 학습 실행](assets/mlflow-trained-model.png)](assets/mlflow-trained-model.png)
 
-    <figcaption>MLflow Source run · 이 모델을 만든 학습 실행</figcaption>
-    </figure>
+<figcaption>MLflow Source run · 이 모델을 만든 학습 실행</figcaption>
+</figure>
 
 ## ④ 예측하고 검증하기 {#4}
 
@@ -220,21 +220,21 @@ with tempfile.TemporaryDirectory() as temporary:
 추론 작업의 상한은 CPU 1개·메모리 2 GiB. 모델 ID·피처 목록·Feast 정의·데이터 해시를 MLflow에 기록했다.
 해시는 읽은 파일에서 자동 계산한다. 파일 변경을 구분하기 위한 실습 설계다.
 
-??? example "MLflow 추론 기록과 S3 결과 파일"
+**MLflow 추론 기록과 S3 결과 파일**
 
-    <figure class="lab-shot" markdown="span">
+<figure class="lab-shot" markdown="span">
 
-    [![사용한 모델 ID·S3 경로를 추론 Run에 기록](assets/inference-model-reference.png)](assets/inference-model-reference.png)
+[![사용한 모델 ID·S3 경로를 추론 Run에 기록](assets/inference-model-reference.png)](assets/inference-model-reference.png)
 
-    <figcaption>사용한 모델 ID·S3 경로를 추론 Run에 기록</figcaption>
-    </figure>
+<figcaption>사용한 모델 ID·S3 경로를 추론 Run에 기록</figcaption>
+</figure>
 
-    <figure class="lab-shot" markdown="span">
+<figure class="lab-shot" markdown="span">
 
-    [![Run별 경로의 predictions.parquet](assets/seaweedfs-prediction-file.png)](assets/seaweedfs-prediction-file.png)
+[![Run별 경로의 predictions.parquet](assets/seaweedfs-prediction-file.png)](assets/seaweedfs-prediction-file.png)
 
-    <figcaption>Run별 경로의 predictions.parquet</figcaption>
-    </figure>
+<figcaption>Run별 경로의 predictions.parquet</figcaption>
+</figure>
 
 ### 공백 오류 해결 {#_3}
 
