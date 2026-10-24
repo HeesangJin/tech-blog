@@ -42,17 +42,39 @@ tags: [MLOps, Azure, MLflow, Feast, Kubeflow]
 맥북의 부담을 줄이기 위해 Azure VM 한 대에 구성했다.
 Ubuntu 22.04, 8 vCPU·32 GiB 환경에서 GPU 없이 실행했다.
 
-| 도구 | 맡긴 역할 |
-|---|---|
-| JupyterLab | 데이터 탐색과 학습 코드를 셀 단위로 실행 |
-| MLflow | 설정·데이터 정보·점수·모델과 산출물 기록 |
-| Feast | 사용자 ID와 시점을 기준으로 입력 피처 조회 |
-| Kubeflow Pipelines | 작업 순서를 정의하고 Kubernetes에서 실행 |
-| SeaweedFS | 컨테이너가 공유하는 S3 호환 파일·모델 저장소 |
+```mermaid
+flowchart TB
+    Browser["맥북 브라우저"]
+    subgraph VM["Azure VM"]
+        Access["SSH 터널 · VM loopback"]
+        J["JupyterLab · Docker"]
+        R["Redis · Docker"]
+        subgraph K8s["kind Kubernetes"]
+            K["Kubeflow Pipelines"]
+            P["학습·평가·추론 Pod<br/>추론에는 Feast SDK 포함"]
+            M["MLflow · 실행 기록과 모델 정보"]
+            S["SeaweedFS · 피처·모델·산출물"]
+            DB["MLflow DB · PVC"]
+            K -->|"작업 실행"| P
+            P -->|"기록·모델 정보 조회"| M
+            P <-->|"파일 직접 읽기·쓰기"| S
+            M --> DB
+        end
+        Access --> J
+        Access --> K
+        Access --> M
+        J --> M
+        J --> S
+        J -.->|"Feast 온라인 조회 실습"| R
+    end
+    Browser --> Access
+```
 
-VM에 Docker와 kind로 Kubernetes를 만들고 Kubeflow Pipelines·MLflow·SeaweedFS를 띄웠다.
-JupyterLab과 Redis는 별도 Docker 컨테이너로 실행했다. 전체 Kubeflow가 아닌 **Pipelines standalone** 구성이다.
-SSH 터널로 접속하고, 실습 후에는 VM을 할당 해제했다. 디스크 보존 비용은 별도로 남는다.
+JupyterLab과 Redis는 VM의 별도 Docker 컨테이너이며, 파이프라인 작업은 Kubernetes Pod에서 실행된다.
+**코드가 실행되는 곳은 Jupyter 커널 또는 작업 Pod이고, MLflow는 실행 기록을 관리하며 SeaweedFS는 파일을 보관한다.**
+추론 Pod의 Feast SDK는 SeaweedFS의 과거 피처를 조회한다. Redis는 노트북의 온라인 조회 실습에 사용했다.
+
+전체 Kubeflow가 아닌 **Pipelines standalone** 구성이다. 실습 후에는 VM을 할당 해제하되 디스크는 보존했다.
 
 ## 1. 노트북에서 학습하고 MLflow로 비교하기
 
@@ -71,13 +93,11 @@ with mlflow.start_run(run_name=model_name) as run:
 
 점수는 평가 작업에서 같은 Run에 추가했다.
 
-
 | 모델 | Accuracy | ROC-AUC | F1 |
 |---|---:|---:|---:|
 | Decision Tree | 0.8228 | 0.8298 | 0.6103 |
 | Random Forest | 0.8276 | 0.8631 | 0.6179 |
 | XGBoost | 0.8314 | 0.8818 | 0.6198 |
-
 
 <figure markdown="span">
 
@@ -85,7 +105,6 @@ with mlflow.start_run(run_name=model_name) as run:
 
 <figcaption>MLflow에서 같은 데이터로 학습한 세 모델의 지표를 비교했다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
 </figure>
-
 
 추론에는 XGBoost를 사용했다. 이번에는 테스트 점수로 모델까지 비교했지만,
 실무에서는 모델 선택용 검증 데이터와 최종 평가용 테스트 데이터를 분리해야 한다.
@@ -114,20 +133,37 @@ UI에서는 **Clone run → 파라미터 확인 → Start**로 다시 실행하�
 <figcaption>Kubeflow 학습 작업이 만든 비교 리포트. 각 모델의 MLflow Run으로 연결된다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
 </figure>
 
-핵심 함수는 그대로 두고 KFP 컴포넌트로 감쌌다. `Output`으로 선언한 결과가 UI의 노란 산출물 노드가 된다.
+### Python 코드가 DAG로 연결되는 지점
+
+핵심 함수를 `@dsl.component`로 감싼 뒤, 파이프라인 함수에서 그 결과를 다음 작업의 입력으로 넘겼다.
+아래는 **뒤에서 실행할 4단계 추론 파이프라인**의 연결 코드다. 자원·환경 설정은 생략했다.
 
 ```python
-@dsl.component(base_image=IMAGE, install_kfp_package=False)
-def read_requests(bucket: str, key: str,
-                  requests: dsl.Output[dsl.Dataset]):
-    from chapter5_poc.tasks import read_requests as run
-    actual_sha256 = run(bucket, key, requests.path)
-    requests.metadata.update({
-        'source_uri': f's3://{bucket}/{key}',
-        'sha256': actual_sha256,
-    })
+@dsl.pipeline(name='chapter5-income-batch-inference')
+def pipeline(requests_bucket: str, requests_key: str,
+             model_uri: str, output_prefix: str = 'predictions'):
+    read = read_requests(bucket=requests_bucket, key=requests_key)
+    features = retrieve_features(requests=read.outputs['requests'])
+    predictions = run_inference(
+        features=features.outputs['features'],
+        lineage=features.outputs['lineage'], model_uri=model_uri,
+        kfp_run_id=dsl.PIPELINE_JOB_ID_PLACEHOLDER,
+    )
+    write_predictions(
+        predictions=predictions.outputs['predictions'],
+        bucket=requests_bucket, prefix=output_prefix,
+        kfp_run_id=dsl.PIPELINE_JOB_ID_PLACEHOLDER,
+    )
 ```
 
+| 코드 | UI의 DAG에서 보이는 것 |
+|---|---|
+| `read_requests(...)` 등 컴포넌트 호출 | 파란 작업 노드 |
+| 컴포넌트가 `Output`으로 선언한 `requests` 등 | 노란 산출물 노드 |
+| `read.outputs['requests']`를 다음 입력으로 전달 | 선행 작업의 결과를 기다리는 화살표 |
+
+이 함수는 **컴파일할 때 그래프를 구성**한다. 실행 시에는 Kubeflow가 각 작업 Pod에서 핵심 함수를 호출한다.
+파이프라인 함수 자체가 별도의 학습·추론 Pod로 실행되는 구조는 아니다.
 
 ## 3. Feast로 추론 입력 가져오기
 
@@ -156,7 +192,6 @@ result = store.get_historical_features(
     features=FEATURES,
 ).to_df()
 ```
-
 
 ## 4. 저장한 모델로 배치 추론하기
 
@@ -188,16 +223,6 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     model = mlflow.sklearn.load_model(directory)
 ```
-
-
-```mermaid
-flowchart LR
-    A[요청 파일 읽기] --> B[Feast 피처 조회]
-    B --> C[모델로 예측]
-    C --> D[결과·기록 저장]
-    S[SeaweedFS 모델 파일] --> C
-```
-
 
 <figure markdown="span">
 
@@ -234,16 +259,30 @@ flowchart LR
 <figcaption>SeaweedFS에 Run별 경로로 저장한 최종 predictions.parquet · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
 </figure>
 
-
 ## 겪었던 문제: 성공했는데 예측이 이상하다
 
-파이프라인은 성공했지만 다섯 요청의 예측 확률이 모두 같았다.
-원인은 **학습에서는 문자열 공백을 제거했는데, 추론에서는 그대로 넣은 것**이었다.
-인코더가 이를 모르는 범주로 처리하면서 입력 정보가 사라졌다.
+파이프라인은 성공했지만 서로 다른 다섯 요청의 예측 확률이 모두 같았다.
+입력을 원본·학습 코드와 대조하니 **학습에서는 공백을 제거했지만 Feast에서 가져온 값에는 앞 공백이 남아 있었다.**
+예를 들어 `'Private'`와 `' Private'`는 인코더에 서로 다른 범주다.
+`OneHotEncoder(handle_unknown='ignore')`가 모르는 범주를 오류 없이 무시하면서 입력 정보가 사라졌다.
 
-추론에도 같은 공백 제거를 적용하고 입력과 인코딩 결과를 확인했다.
-수정 후에는 같은 모델로 직접 계산한 값과 파이프라인 예측값이 일치했다.
+추론에서도 학습과 같은 공백 제거를 적용했다. 모델은 다시 학습하지 않았다.
 
+```python
+X = df[COLUMNS].apply(lambda column: column.str.strip())
+labels = model.predict(X)
+probabilities = model.predict_proba(X)[:, list(model.classes_).index(1)]
+```
+
+수정 후에는 확률이 달라졌다는 사실에 더해 다음을 확인했다.
+
+| 확인한 근거 | 결과 |
+|---|---|
+| 원핫 인코딩 결과 | 5건 모두 행마다 8개 피처의 범주가 하나씩 활성화됨 |
+| 모르는 범주 수 | `unknown_category_values = 0`을 MLflow에 기록 |
+| 같은 모델로 별도 계산 | 파이프라인의 예측 클래스·확률과 일치 |
+
+정규화한 입력도 MLflow에 남겨 재확인할 수 있게 했다.
 
 <figure markdown="span">
 
@@ -251,7 +290,6 @@ flowchart LR
 
 <figcaption>최종 HTML 리포트의 예측 결과. 성별·직업·소득 구간은 책의 공개 예제 데이터이며 작성자나 회사 고객의 정보가 아니다. 클릭하면 원본 크기로 볼 수 있다.</figcaption>
 </figure>
-
 
 별도로 원본 행과 연결해 정답을 대조했을 때는 5건 중 3건이 맞았다.
 학습에 포함된 소수 샘플이므로 일반화 성능 평가는 아니다.
@@ -275,7 +313,7 @@ Kubeflow로 같은 흐름을 반복 실행할 수 있게 만들었다.
 
 ## 다음 단계: MLOps로 개선을 반복하기
 
-앞으로는 이번에 만든 흐름으로 개선 실험을 진행할 계획이다.
+앞으로는 이 흐름으로 개선 실험을 반복할 계획이다.
 
 ```text
 오분류 분석 → 데이터·전처리·학습 설정 변경 → Kubeflow 재실행
