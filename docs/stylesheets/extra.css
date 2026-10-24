@@ -11,3 +11,6 @@
 .md-typeset figure { margin: 1.5em 0 2em; }
 .md-typeset figure img { border: 1px solid var(--md-default-fg-color--lightest); }
 .md-typeset figcaption { font-size: .78rem; line-height: 1.6; color: var(--md-default-fg-color--light); max-width: 100%; }
+
+/* Keep evidence compact; the image link opens the original. */
+.md-typeset .lab-shot img { max-height: 420px; width: auto; object-fit: contain; }

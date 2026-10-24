@@ -4,148 +4,87 @@ date: 2026-10-25
 tags: [MLOps, Azure, MLflow, Feast, Kubeflow]
 ---
 
-## 개발 흐름과 이 글의 지도 {#reading-map}
+## 한눈에 보기 {#reading-map}
 
-각 행을 **왼쪽부터 ‘개발자가 하는 일 → MLOps에서의 의미 → 이 글에서 읽을 부분’**으로 보면 된다.
-위에서 아래로 실습을 따라가고, 결과에서 문제를 찾으면 다시 실험으로 돌아간다.
+**목표: 학습한 모델과 입력의 출처를 남기고, 같은 절차를 다시 실행하기.** 아래 순서로 읽으면 된다.
 
 ```mermaid
-flowchart TB
-    accTitle: ML 개발 업무와 MLOps 라이프사이클에 맞춘 문서 읽기 순서
-    accDescr: 준비, 실험, 반복 실행, 배치 추론, 검증과 개선의 순서로 개발 업무와 문서의 해당 부분을 연결한다.
-    subgraph S0["0 · 목표와 실행 기반"]
-        direction LR
-        W0["하는 일<br/>예측 목표·데이터 확인<br/>실행 환경 준비"] --> L0["라이프사이클<br/>문제 정의·데이터 준비"] --> T0["읽을 부분<br/>실습 배경 → MLOps 개념<br/>→ 환경과 구성도"]
-    end
-    subgraph S1["1 · 노트북에서 실험"]
-        direction LR
-        W1["하는 일<br/>데이터 탐색·전처리<br/>학습·점수 비교"] --> L1["라이프사이클<br/>실험·학습·평가"] --> T1["본문 1<br/>JupyterLab에서 실행<br/>MLflow에 기록·비교"]
-    end
-    subgraph S2["2 · 반복 가능한 작업으로 연결"]
-        direction LR
-        W2["하는 일<br/>코드를 함수로 분리<br/>입력·출력·순서 정의"] --> L2["라이프사이클 전반<br/>실험과 추론의<br/>반복 실행 체계화"] --> T2["본문 2<br/>KFP 코드 → DAG<br/>→ 작업 Pod 실행"]
-    end
-    subgraph S3["3 · 선택한 모델로 예측"]
-        direction LR
-        W3["하는 일<br/>사용자 피처 조회<br/>저장한 모델로 예측"] --> L3["라이프사이클<br/>추론 입력 준비<br/>배치 추론"] --> T3["본문 3·4<br/>Feast 조회 → 모델 로드<br/>→ 예측 결과 저장"]
-    end
-    subgraph S4["4 · 결과 확인과 개선"]
-        direction LR
-        W4["하는 일<br/>입력·예측 검증<br/>원인 수정·다음 실험"] --> L4["라이프사이클<br/>검증·피드백·개선<br/>→ 1단계 실험으로"] --> T4["마무리<br/>공백 오류 해결<br/>→ 결론·개선 계획"]
-    end
-    S0 --> S1 --> S2 --> S3 --> S4
-    S4 -.-> Future["향후 확장<br/>운영 API · 모니터링 · 자동 재학습"]
-    classDef work fill:#e8f5e9,stroke:#66a880,color:#163d2b
-    classDef lifecycle fill:#e8f0fe,stroke:#7699cc,color:#20385a
-    classDef reading fill:#fff4db,stroke:#c9a45c,color:#543e14
-    classDef future fill:#f3f4f6,stroke:#9ca3af,color:#4b5563,stroke-dasharray:5 5
-    class W0,W1,W2,W3,W4 work
-    class L0,L1,L2,L3,L4 lifecycle
-    class T0,T1,T2,T3,T4 reading
-    class Future future
+flowchart LR
+    A["① 탐색·학습·평가<br/>JupyterLab"] --> B["② 작업 연결·재실행<br/>Kubeflow"]
+    B --> C["③ 피처·모델 준비<br/>Feast · SeaweedFS"]
+    C --> D["④ 예측·검증<br/>작업 Pod"]
+    D -.->|"개선"| A
 ```
 
-MLflow 기록은 실험·학습·추론에 걸쳐 남기고, Kubeflow는 정해진 작업의 실행을 관리한다.
-그림의 ‘반복 실행’은 별도의 필수 생애주기 단계라기보다 여러 단계를 다시 수행하기 위한 공통 기반이다.
+| 실행 | 기록·비교 | 파일 보관 |
+|---|---|---|
+| 노트북 커널 / KFP 작업 Pod | MLflow | SeaweedFS |
 
+**MLOps = 데이터 → 학습 → 평가 → 추론 → 개선을 반복·추적하는 체계.** 코드뿐 아니라 데이터·모델의 변화와 품질도 관리한다.
 
-## 왜 이 실습을 했나
+??? note "책 1~5장과 이번 실습"
 
-『Machine Learning Platform Engineering』을 읽으면서 궁금했던 것은 **“학습한 모델을 어떻게 반복해서 실행하고 운영할까?”**였다.
-모델을 한 번 학습하는 것과, 데이터·코드가 바뀌어도 결과를 비교하고 다시 실행할 수 있게 만드는 것은 다른 문제였다.
+    | 장 | 핵심 |
+    |---|---|
+    | 1 | ML 개발·운영 생애주기와 역할 |
+    | 2 | DevOps와의 차이, 반복과 자동화 수준 |
+    | 3 | Docker·Kubernetes, CI/CD·모니터링 |
+    | 4 | MLflow 실험 추적·Feast 피처 관리 |
+    | 5 | Kubeflow 파이프라인 |
 
-책 1~5장은 이 흐름의 기반을 설명한다.
+    『Machine Learning Platform Engineering』의 개념을 소득 분류 예제로 연결했다.
 
-| 장 | 핵심 내용 |
+## 실행 환경과 역할 {#_2}
+
+| 환경 | 구성 |
 |---|---|
-| 1. MLOps와 ML 엔지니어링 | 실험에서 운영으로 이어지는 생애주기, 개발자와 플랫폼의 역할 |
-| 2. MLOps | DevOps와의 차이, 데이터 변화에 대응하는 반복 과정과 자동화 수준 |
-| 3. Kubernetes 기반 | Docker·Kubernetes 실행 기반에 CI/CD와 운영 모니터링을 연결 |
-| 4. 실험과 피처 관리 | MLflow로 실험·모델을 기록하고 Feast로 학습·추론용 피처를 관리하는 방법 |
-| 5. 파이프라인 오케스트레이션 | 작업과 데이터 전달을 DAG로 정의하고 Kubeflow Pipelines로 배치 추론을 자동화하는 방법 |
-
-이 글에서는 이 개념들을 실제 학습·추론 과정으로 연결해본 경험을 정리한다.
-
-## MLOps와 전체 흐름
-
-**MLOps는 모델 개발과 운영을 연결하고, 데이터·코드·모델의 변경을 추적하며 실행·검증을 반복 가능하게 만드는 방법과 체계다.**
-코드가 같아도 학습 데이터가 달라지면 모델이 달라지고, 운영 입력의 변화로 성능이 떨어질 수 있다.
-그래서 MLOps는 DevOps의 빌드·배포에 더해 **데이터·모델·실험과 예측 품질**까지 관리한다.
-
-**JupyterLab은 실험하는 작업 공간, MLflow는 실행과 모델의 기록 체계, Kubeflow Pipelines는 작업의 실행 순서와 상태를 관리하는 체계**다.
-개발자가 셀을 실행하며 확인한 과정을 파이프라인으로 옮겨도, 학습·평가 로직과 MLflow 기록 코드는 재사용할 수 있다.
-
-실험에서는 유용한 모델을 찾고, 스테이징에서는 배포 후보를 검증하며, 프로덕션에서는 실제 요청을 처리하고 품질을 관측한다.
-이번에는 **학습·평가와 배치 추론의 연결**을 확인했다. 운영 API와 스테이징 승격 절차까지 구성한 것은 아니다.
-
-## 환경과 도구의 역할
-
-맥북의 부담을 줄이기 위해 Azure VM 한 대에 구성했다.
-Ubuntu 22.04, 8 vCPU·32 GiB 환경에서 GPU 없이 실행했다.
+| Azure VM | Ubuntu 22.04 · 8 vCPU / 32 GiB · CPU 학습 |
+| VM의 Docker | JupyterLab · Redis |
+| kind Kubernetes | KFP standalone · MLflow · SeaweedFS · 작업 Pod |
 
 ```mermaid
-flowchart TB
-    Browser["맥북 브라우저"]
-    subgraph VM["Azure VM"]
-        Access["SSH 터널 · VM loopback"]
-        J["JupyterLab · Docker"]
-        R["Redis · Docker"]
-        subgraph K8s["kind Kubernetes"]
-            K["KFP UI·API<br/>공유 Workflow Controller"]
-            P["학습·평가·추론 Pod<br/>추론에는 Feast SDK 포함"]
-            M["MLflow Tracking Server<br/>UI·실행 기록·모델 정보"]
-            S["SeaweedFS · 피처·모델·산출물"]
-            DB["MLflow DB · PVC"]
-            K -->|"작업 실행"| P
-            P -->|"MLflow SDK · 기록·조회"| M
-            P <-->|"파일 직접 읽기·쓰기"| S
-            M --> DB
-        end
-        Access --> J
-        Access --> K
-        Access --> M
-        J --> M
-        J --> S
-        J -.->|"Feast 온라인 조회 실습"| R
+flowchart LR
+    J["Jupyter<br/>Python 커널"] -->|"SDK"| M
+    subgraph K8s["Kubernetes"]
+        K["KFP API·Controller"] --> P["작업 Pod"]
+        P -->|"SDK"| M["MLflow 서버"]
+        M --> DB[("기록 DB · PVC")]
+        P <-->|"직접 전송"| S[("SeaweedFS")]
     end
-    Browser --> Access
+    J <--> S
 ```
 
-노트북 코드는 VM의 Jupyter 컨테이너 안 Python 커널에서, 파이프라인 코드는 Kubernetes 작업 Pod에서 실행된다.
-둘 다 MLflow SDK로 같은 Tracking Server에 기록한다. 서버는 설정·점수·모델 정보를 DB에 보관하고 UI로 보여준다.
-**이번 구성의 모델·산출물 파일은 클라이언트가 SeaweedFS에 직접 읽고 쓴다.** MLflow 서버가 학습·추론을 대신 실행하지는 않는다.
+| 도구 | 역할 |
+|---|---|
+| JupyterLab | 코드를 편집하고 셀 실행. 실제 연산은 커널 |
+| MLflow SDK → 서버 | Run·설정·점수·모델 정보 기록 → UI에서 비교 |
+| KFP SDK → API·Controller → Pod | DAG 정의 → 실행 제어 → Python 작업 실행 |
+| SeaweedFS | 모델·피처·산출물 파일 저장 |
 
-Kubeflow에서는 UI·API가 Run을 받고 공유 Workflow Controller와 실행 제어가 DAG를 진행시킨다.
-각 작업 Pod가 핵심 Python 함수를 실행하며, 그 코드가 MLflow에 결과를 남긴다.
-추론 Pod의 Feast SDK는 과거 피처를 조회하고, Redis는 노트북의 온라인 조회 실습에 사용했다.
+Redis는 노트북의 Feast 온라인 조회에 사용했다. 접속은 SSH 터널, 종료는 VM 할당 해제이며 디스크 비용은 남는다.
 
-Kubernetes 관점에서는 **이미지**가 코드·의존성을 묶고 **Pod**가 실행한다.
-**Deployment**는 상시 서비스의 복제본을 유지하고 **Service**는 접속 주소를 제공한다.
-**ConfigMap·Secret**은 설정·비밀 전달, **PVC**는 영속 저장, 책에서 소개하는 **Helm**은 여러 리소스의 설치 구성을 묶는 도구다.
-전체 Kubeflow가 아닌 Pipelines standalone 구성으로, 실습 후 VM을 할당 해제하고 디스크는 보존했다.
+## ① 노트북에서 실험하기 {#1-mlflow}
 
-## 1. 노트북에서 학습하고 MLflow로 비교하기
+```text
+CSV → EDA → 분할 → 전처리 → 학습 → 평가 → 설정 변경
+```
 
-소득 데이터 30,162행에서 직업·교육 등 범주형 피처 8개로 `>50K` 여부를 예측했다.
-JupyterLab에서 **CSV 읽기 → EDA → 데이터 분할 → 전처리 → 세 모델 학습·평가**를 셀 단위로 실행했다.
-표와 그래프를 보며 입력을 이해하고, 학습 80%·테스트 20% 분할과 원핫 인코딩을 적용했다.
+| 개발자의 작업 | 이번 실습 |
+|---|---|
+| 문제 정의 | 직업·교육 등 8개 피처로 소득 >50K 여부 예측 |
+| 데이터 탐색 | 30,162행의 표·그래프 확인 |
+| 입력 준비 | 학습 80% / 테스트 20%, 원핫 인코딩 |
+| 모델 비교 | Decision Tree · Random Forest · XGBoost |
+| 기록 | 파라미터·점수·분석 산출물·모델 |
 
-JupyterLab은 코드·설명·출력을 함께 보는 화면이고, 셀의 Python 코드는 커널이 실행한다.
-`fit()`은 학습 라이브러리가 실행하며, MLflow 기록은 우리가 넣은 `log_*` 호출이 담당한다.
-셀 출력 전체가 저절로 MLflow에 저장되는 것은 아니다. 남길 그래프·표·데이터 정보·모델을 코드에서 지정했다.
-
-학습 코드에서 기록하는 부분은 다음과 같다. 아래 코드들은 실제 구현의 핵심만 발췌했으며, 초기화와 검증 코드는 생략했다.
+핵심 코드만 발췌했다. `fit()`은 학습, `log_*()`는 기록이다. 셀 출력 전체가 자동 저장되지는 않는다.
 
 ```python
-with mlflow.start_run(run_name=model_name) as run:
+with mlflow.start_run(run_name=model_name):
     mlflow.log_param('seed', 42)
     model.fit(X_train, y_train)
     logged = mlflow.sklearn.log_model(model, name='model')
 ```
-
-MLflow의 **Experiment**는 같은 목적의 실험 묶음, **Run**은 개별 실행이다.
-노트북에서는 학습·평가·기록을 한 함수로 실행했고, 이후 KFP에서는 학습 작업이 저장한 Run에 평가 작업이 점수를 추가했다.
-개발자는 비교 결과를 보고 모델·파라미터를 선택한다. MLflow가 점수를 기록했다고 자동으로 모델을 고르는 것은 아니다.
 
 | 모델 | Accuracy | ROC-AUC | F1 |
 |---|---:|---:|---:|
@@ -153,44 +92,25 @@ MLflow의 **Experiment**는 같은 목적의 실험 묶음, **Run**은 개별 �
 | Random Forest | 0.8276 | 0.8631 | 0.6179 |
 | XGBoost | 0.8314 | 0.8818 | 0.6198 |
 
-<figure markdown="span">
+<figure class="lab-shot" markdown="span">
 
-[![MLflow에서 같은 데이터로 학습한 세 모델의 지표를 비교했다](assets/training-comparison.png)](assets/training-comparison.png)
+[![MLflow · 세 모델 비교. 이미지는 클릭하면 원본으로 열린다.](assets/training-comparison.png)](assets/training-comparison.png)
 
-<figcaption>MLflow에서 같은 데이터로 학습한 세 모델의 지표를 비교했다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
+<figcaption>MLflow · 세 모델 비교. 이미지는 클릭하면 원본으로 열린다.</figcaption>
 </figure>
 
-추론에는 XGBoost를 사용했다. 이번에는 테스트 점수로 모델까지 비교했지만,
-실무에서는 모델 선택용 검증 데이터와 최종 평가용 테스트 데이터를 분리해야 한다.
+`Experiment`는 실험 묶음, `Run`은 개별 실행이다. 모델 선택은 개발자가 한다.
+이번에는 테스트 점수로 모델까지 비교했지만, 다음에는 **검증셋으로 선택 → 테스트셋으로 최종 평가**를 분리한다.
 
-## 2. Kubeflow로 반복 실행하기
+## ② 반복 실행으로 옮기기 {#2-kubeflow}
 
-탐색 중에는 셀을 바꿔가며 실행하는 방식이 편했다. 반복할 절차가 정해진 뒤에는 준비·학습·평가 코드를 Python 함수로 분리하고 KFP SDK로 연결했다.
-개발자는 데이터·모델·평가 기준을 바꾸고, 플랫폼 측에서는 이미지·저장소·권한·실행 자원을 제공한다. 팀에 따라 이 역할을 같은 사람이 맡을 수도 있다.
-
-```text
-데이터 준비 → 모델 학습·저장 → 평가 → 세 모델 비교
+```mermaid
+flowchart LR
+    A["노트북 셀"] --> B["Python 함수"] --> C["KFP 컴포넌트"] --> D["DAG·YAML"] --> E["작업 Pod"]
 ```
 
-KFP SDK는 이 연결을 YAML로 컴파일하고, 서버는 정의에 따라 작업 Pod를 실행한다.
-노트북에서 사람이 다음 셀을 눌렀던 실행 순서가 작업 간 의존성으로 바뀐 것이다. 자원 부담을 줄이기 위해 세 모델은 순차 실행했다.
-
-UI에서는 **Clone run → 파라미터 확인 → Start**로 다시 실행하고,
-그래프에서 진행 상태와 로그·산출물을 확인했다.
-
-**한 번의 학습·추론 실행 안에서 Kubeflow와 MLflow가 함께 사용된다. Kubeflow가 MLflow 기록을 읽어서 자동으로 학습을 개선하는 구조는 아니다.**
-
-<figure markdown="span">
-
-[![Kubeflow 학습 작업이 만든 비교 리포트. 각 모델의 MLflow Run으로 연결된다](assets/kubeflow-training-report.png)](assets/kubeflow-training-report.png)
-
-<figcaption>Kubeflow 학습 작업이 만든 비교 리포트. 각 모델의 MLflow Run으로 연결된다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
-</figure>
-
-### Python 코드가 DAG로 연결되는 지점
-
-핵심 함수를 `@dsl.component`로 감싼 뒤, 파이프라인 함수에서 그 결과를 다음 작업의 입력으로 넘겼다.
-아래는 **뒤에서 실행할 4단계 추론 파이프라인**의 연결 코드다. 자원·환경 설정은 생략했다.
+학습은 **준비 → 학습·모델 저장 → 평가 → 비교**로 분리했다. 자원 부담을 줄여 세 모델을 순차 실행했다.
+아래는 추론 DAG의 실제 연결 코드다. 환경·자원 설정은 생략했다.
 
 ```python
 @dsl.pipeline(name='chapter5-income-batch-inference')
@@ -210,117 +130,122 @@ def pipeline(requests_bucket: str, requests_key: str,
     )
 ```
 
-| 코드 | UI의 DAG에서 보이는 것 |
+| 코드 | DAG |
 |---|---|
-| `read_requests(...)` 등 컴포넌트 호출 | 파란 작업 노드 |
-| 컴포넌트가 `Output`으로 선언한 `requests` 등 | 노란 산출물 노드 |
-| `read.outputs['requests']`를 다음 입력으로 전달 | 선행 작업의 결과를 기다리는 화살표 |
+| 컴포넌트 호출 | 파란 작업 노드 |
+| `Output` | 노란 산출물 노드 |
+| `outputs[...]`를 다음 입력으로 전달 | 의존성 화살표 |
 
-이 함수는 **컴파일할 때 그래프를 구성**한다. 실행 시에는 Kubeflow가 각 작업 Pod에서 핵심 함수를 호출한다.
-파이프라인 함수 자체가 별도의 학습·추론 Pod로 실행되는 구조는 아니다.
+파이프라인 함수는 컴파일 시 그래프를 만든다. 실행 시 핵심 코드는 각 작업 Pod에서 돈다.
+재실행은 **Clone run → 파라미터 확인 → Start**. Pod의 기록 코드는 계속 MLflow를 사용한다.
 
-## 3. Feast로 추론 입력 가져오기
+??? example "학습 파이프라인의 비교 리포트"
 
-책의 예제는 사용자 ID가 붙은 Parquet 파일 3개에 피처를 나눠 저장해두었다.
-Feast에 조회 키인 **Entity**와 데이터 소스·피처·시점 열을 설명하는 **FeatureView**를 등록했다.
+    <figure class="lab-shot" markdown="span">
 
-이후에는 파일 대신 **사용자 ID·조회 시점·피처 이름**을 지정했다.
-Feast가 그 시점보다 늦지 않은 가장 최근의 유효한 값을 찾아 표로 돌려준다.
-별도로 최신 피처를 Redis에 적재해 ID로 빠르게 가져오는 온라인 조회도 실행했다.
+    [![KFP 산출물 · 세 모델의 평가 결과와 MLflow Run 링크](assets/kubeflow-training-report.png)](assets/kubeflow-training-report.png)
 
-이번 학습은 CSV를 직접 읽었고, 다음 배치 추론에서 Feast의 과거 시점 조회를 사용했다.
+    <figcaption>KFP 산출물 · 세 모델의 평가 결과와 MLflow Run 링크</figcaption>
+    </figure>
 
-<figure markdown="span">
+## ③ 피처와 모델 준비하기 {#3-feast}
 
-[![SeaweedFS Filer에서 확인한 원본 피처 파일 3개](assets/seaweedfs-feature-files.png)](assets/seaweedfs-feature-files.png)
+| 대상 | 요청 | 반환 |
+|---|---|---|
+| Feast 과거 조회 | 사용자 ID + 시점 + 피처 목록 | 해당 시점까지 가장 최근의 유효한 값 |
+| Feast 온라인 조회 | 사용자 ID + 피처 목록 | Redis에 적재한 최신 값 |
+| MLflow 모델 조회 | Logged Model ID | 모델 정보·저장 위치 |
+| SeaweedFS 다운로드 | S3 모델 경로 | 모델 파일 |
 
-<figcaption>SeaweedFS Filer에서 확인한 원본 피처 파일 3개 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
-</figure>
-
-조회 코드는 사용자·시점 목록과 요청할 피처 목록을 전달하는 형태다. 실제 배치 추론에서는 8개 피처를 요청했다.
+`Entity`는 조회 키, `FeatureView`는 소스·피처·시점 정의다. 학습은 CSV를 직접 읽었고, 배치 추론에서 Feast를 사용했다.
 
 ```python
-request_df = pd.read_parquet(requests)
 result = store.get_historical_features(
-    entity_df=request_df,
-    features=FEATURES,
+    entity_df=request_df,  # 사용자 ID·시점 목록
+    features=FEATURES,     # 이번에는 8개 피처
 ).to_df()
 ```
 
-## 4. 저장한 모델로 배치 추론하기
-
-모델은 SeaweedFS에 저장하고, 추론 Pod가 직접 내려받도록 구성했다.
-MLflow에서는 사용할 모델의 ID와 저장 위치를 확인한다.
-
-<figure markdown="span">
-
-[![MLflow 모델 페이지의 Source run에서 이 모델을 만든 XGBoost 학습 실행을 확인할 수 있다](assets/mlflow-trained-model.png)](assets/mlflow-trained-model.png)
-
-<figcaption>MLflow 모델 페이지의 Source run에서 이 모델을 만든 XGBoost 학습 실행을 확인할 수 있다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
-</figure>
-
-<figure markdown="span">
-
-[![동일 모델 ID의 실제 파일. model.pkl과 MLmodel·환경 정의가 SeaweedFS에 저장됐다](assets/seaweedfs-model-files.png)](assets/seaweedfs-model-files.png)
-
-<figcaption>동일 모델 ID의 실제 파일. model.pkl과 MLmodel·환경 정의가 SeaweedFS에 저장됐다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
-</figure>
-
-다운로드는 MLflow SDK를 사용하되, `s3://` 위치를 직접 전달해 모델 파일이 MLflow HTTP 프록시를 거치지 않도록 했다.
-
 ```python
 metadata = MlflowClient().get_logged_model(model_uri[len('models:/'):])
-location = metadata.artifact_location  # s3://.../artifacts
 with tempfile.TemporaryDirectory() as temporary:
     directory = mlflow.artifacts.download_artifacts(
-        artifact_uri=location, dst_path=temporary,
+        artifact_uri=metadata.artifact_location,  # s3://...
+        dst_path=temporary,
     )
     model = mlflow.sklearn.load_model(directory)
 ```
 
-<figure markdown="span">
+**모델 파일은 작업 Pod가 SeaweedFS에서 직접 내려받는다.**
 
-[![최종 추론 Run. 네 작업의 성공 상태와 requests·features·lineage·predictions 산출물이 보인다](assets/kubeflow-inference.png)](assets/kubeflow-inference.png)
+<figure class="lab-shot" markdown="span">
 
-<figcaption>최종 추론 Run. 네 작업의 성공 상태와 requests·features·lineage·predictions 산출물이 보인다 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
+[![SeaweedFS · model.pkl, MLmodel, 실행 환경 파일](assets/seaweedfs-model-files.png)](assets/seaweedfs-model-files.png)
+
+<figcaption>SeaweedFS · model.pkl, MLmodel, 실행 환경 파일</figcaption>
 </figure>
 
-추론 작업마다 CPU 최대 1개·메모리 최대 2 GiB로 제한했다. 실제 입출력은 다음과 같다.
+??? example "피처 파일과 모델의 학습 출처"
 
-| 단계 | 워크로드와 산출물 |
+    <figure class="lab-shot" markdown="span">
+
+    [![원본 Parquet 파일 3개](assets/seaweedfs-feature-files.png)](assets/seaweedfs-feature-files.png)
+
+    <figcaption>원본 Parquet 파일 3개</figcaption>
+    </figure>
+
+    <figure class="lab-shot" markdown="span">
+
+    [![MLflow Source run · 이 모델을 만든 학습 실행](assets/mlflow-trained-model.png)](assets/mlflow-trained-model.png)
+
+    <figcaption>MLflow Source run · 이 모델을 만든 학습 실행</figcaption>
+    </figure>
+
+## ④ 예측하고 검증하기 {#4}
+
+<figure class="lab-shot" markdown="span">
+
+[![KFP · 요청 읽기 → Feast 조회 → 예측 → 결과 저장](assets/kubeflow-inference.png)](assets/kubeflow-inference.png)
+
+<figcaption>KFP · 요청 읽기 → Feast 조회 → 예측 → 결과 저장</figcaption>
+</figure>
+
+| 작업 | 산출물 |
 |---|---|
-| 요청 읽기 | 사용자 ID·시점 5건 → `requests` |
-| Feast 조회 | 요청별 입력 피처 8개와 재현 정보 → `features`, `lineage` |
-| 모델 예측 | 새로 학습한 XGBoost로 5건 예측 → `predictions` |
-| 결과 저장 | `predictions.parquet` 저장, 저장 확인 정보와 HTML 표 → `receipt`, `report` |
+| 요청 읽기 | 사용자 ID·시점 5건: `requests` |
+| Feast 조회 | 8개 피처와 재현 정보: `features`, `lineage` |
+| 모델 예측 | 예측값: `predictions` |
+| 결과 저장 | `predictions.parquet`, 저장 확인 정보, HTML 리포트 |
 
-재현하려면 사용자와 시점뿐 아니라 **요청한 피처 목록, Feast 정의, 데이터와 모델의 버전**도 필요했다.
-이 정보와 실제 읽은 파일의 해시를 MLflow에 함께 기록했다.
-해시는 수동 입력 대신 자동 계산하도록 바꿨다. MLflow의 필수 요구사항이 아니라,
-같은 경로의 파일이 바뀌었는지 구분하기 위한 선택이었다.
+추론 작업의 상한은 CPU 1개·메모리 2 GiB. 모델 ID·피처 목록·Feast 정의·데이터 해시를 MLflow에 기록했다.
+해시는 읽은 파일에서 자동 계산한다. 파일 변경을 구분하기 위한 실습 설계다.
 
-<figure markdown="span">
+??? example "MLflow 추론 기록과 S3 결과 파일"
 
-[![추론 MLflow Run에 남긴 모델 ID·실제 S3 경로·직접 다운로드 방식](assets/inference-model-reference.png)](assets/inference-model-reference.png)
+    <figure class="lab-shot" markdown="span">
 
-<figcaption>추론 MLflow Run에 남긴 모델 ID·실제 S3 경로·직접 다운로드 방식 · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
-</figure>
+    [![사용한 모델 ID·S3 경로를 추론 Run에 기록](assets/inference-model-reference.png)](assets/inference-model-reference.png)
 
-<figure markdown="span">
+    <figcaption>사용한 모델 ID·S3 경로를 추론 Run에 기록</figcaption>
+    </figure>
 
-[![SeaweedFS에 Run별 경로로 저장한 최종 predictions.parquet](assets/seaweedfs-prediction-file.png)](assets/seaweedfs-prediction-file.png)
+    <figure class="lab-shot" markdown="span">
 
-<figcaption>SeaweedFS에 Run별 경로로 저장한 최종 predictions.parquet · 클릭하면 원본 크기로 볼 수 있다.</figcaption>
-</figure>
+    [![Run별 경로의 predictions.parquet](assets/seaweedfs-prediction-file.png)](assets/seaweedfs-prediction-file.png)
 
-## 겪었던 문제: 성공했는데 예측이 이상하다
+    <figcaption>Run별 경로의 predictions.parquet</figcaption>
+    </figure>
 
-파이프라인은 성공했지만 서로 다른 다섯 요청의 예측 확률이 모두 같았다.
-입력을 원본·학습 코드와 대조하니 **학습에서는 공백을 제거했지만 Feast에서 가져온 값에는 앞 공백이 남아 있었다.**
-예를 들어 `'Private'`와 `' Private'`는 인코더에 서로 다른 범주다.
-`OneHotEncoder(handle_unknown='ignore')`가 모르는 범주를 오류 없이 무시하면서 입력 정보가 사라졌다.
+### 공백 오류 해결 {#_3}
 
-추론에서도 학습과 같은 공백 제거를 적용했다. 모델은 다시 학습하지 않았다.
+```mermaid
+flowchart LR
+    A["Private<br/>학습 입력"] --> C["범주 불일치"]
+    B["앞 공백 + Private<br/>추론 입력"] --> C
+    C --> D["미등록 범주 무시<br/>입력 정보 손실"] --> E["서로 다른 요청<br/>같은 예측 확률"]
+```
+
+원본·학습 코드를 대조해 공백 차이를 찾았다. `handle_unknown='ignore'` 때문에 오류 없이 진행됐다.
 
 ```python
 X = df[COLUMNS].apply(lambda column: column.str.strip())
@@ -328,70 +253,42 @@ labels = model.predict(X)
 probabilities = model.predict_proba(X)[:, list(model.classes_).index(1)]
 ```
 
-수정 후에는 확률이 달라졌다는 사실에 더해 다음을 확인했다.
-
-| 확인한 근거 | 결과 |
+| 수정 | 검증 |
 |---|---|
-| 원핫 인코딩 결과 | 5건 모두 행마다 8개 피처의 범주가 하나씩 활성화됨 |
-| 모르는 범주 수 | `unknown_category_values = 0`을 MLflow에 기록 |
-| 같은 모델로 별도 계산 | 파이프라인의 예측 클래스·확률과 일치 |
+| 모델 유지, 추론에 공백 제거 적용 | 5건 모두 원핫 범주 8개 활성화 |
+| 정규화한 입력도 MLflow에 저장 | 미등록 범주 수 0 |
+| 같은 모델로 별도 계산 | 파이프라인 예측 클래스·확률과 일치 |
 
-정규화한 입력도 MLflow에 남겨 재확인할 수 있게 했다.
+<figure class="lab-shot" markdown="span">
 
-<figure markdown="span">
+[![수정 후 예측 결과 · 책의 공개 예제 데이터](assets/prediction-result.png)](assets/prediction-result.png)
 
-[![최종 HTML 리포트의 사용자별 예측 확률과 소득 구간](assets/prediction-result.png)](assets/prediction-result.png)
-
-<figcaption>최종 HTML 리포트의 예측 결과. 성별·직업·소득 구간은 책의 공개 예제 데이터이며 작성자나 회사 고객의 정보가 아니다. 클릭하면 원본 크기로 볼 수 있다.</figcaption>
+<figcaption>수정 후 예측 결과 · 책의 공개 예제 데이터</figcaption>
 </figure>
 
-별도로 원본 행과 연결해 정답을 대조했을 때는 5건 중 3건이 맞았다.
-학습에 포함된 소수 샘플이므로 일반화 성능 평가는 아니다.
-**실행 성공, 입력·계산의 정확성, 예측 성능은 각각 확인해야 했다.**
+별도 정답 대조는 **3/5 일치**. 학습에 포함된 소수 샘플이며, 일반화 성능이나 MLflow에 자동 기록된 정확도가 아니다.
 
-## 결론과 개선점
+## 결론과 다음 실험 {#_4}
 
-이번 실습에서는 **학습 실행 → 저장한 모델 → 추론 입력 → 예측 결과**를 연결했다.
-MLflow로 실행과 모델의 출처를 기록하고, Feast로 입력 피처를 조회하고,
-Kubeflow로 같은 흐름을 반복 실행할 수 있게 만들었다.
+**실행 성공 ≠ 올바른 입력 ≠ 좋은 예측.** 이번에는 출처를 추적하고 같은 절차를 다시 실행할 기반을 만들었다.
 
-하지만 파이프라인이 정상적으로 끝나는 것과 모델이 좋은 예측을 하는 것은 별개였다.
-다섯 건 중 두 건은 틀렸고, 공백 처리 차이만으로도 입력이 달라졌다.
-이 다섯 건만으로 전체 성능을 판단할 수는 없지만, **이제는 실행 환경을 만드는 데서 나아가 예측 품질을 개선할 차례**다.
-
-우선 다음을 보완하려 한다.
-
-- **평가 기준 정리**: 학습·검증·테스트 데이터를 분리하고, 정확도뿐 아니라 F1·정밀도·재현율과 오분류 사례를 함께 본다.
-- **전처리 일관성 확보**: 문자열 공백 처리까지 모델의 전처리 과정에 포함해 학습과 추론에서 같은 변환을 사용한다.
-- **데이터와 모델 개선**: 누락된 유용한 피처, 데이터 품질, 추가 데이터의 효과를 살펴보고 모델과 하이퍼파라미터를 바꿔 비교한다.
-
-## 다음 단계: MLOps로 개선을 반복하기
-
-실험 추적과 파이프라인 실행을 연결한 다음에는 운영으로 이어지는 자동화가 필요하다.
-
-| 보완할 영역 | 다음에 연결할 내용 |
+| 다음 작업 | 목적 |
 |---|---|
-| CI | 코드 변경 시 테스트 → 이미지 빌드 → 코드·이미지 버전 연결. 책에서는 GitLab CI를 다룬다 |
-| CD·GitOps | 검증한 파이프라인·서비스 배포 설정 반영과 복구. 책에서는 Argo CD를 다룬다 |
-| 모니터링 | Prometheus·Grafana로 오류·지연·자원 관측, 별도로 입력 변화와 예측 품질 확인 |
+| 학습·검증·테스트 분리 | 모델 선택과 최종 평가 구분 |
+| 전처리 통합 | 학습·추론 입력 일치 |
+| 데이터·피처·파라미터 변경 | MLflow에서 개선 효과 비교 |
+| CI/CD·운영 모니터링 | 코드 검사·이미지 빌드·배포, 오류·지연·품질 관측 |
 
-자동화 수준은 수동 실행에서 학습 파이프라인 자동화, 파이프라인 자체의 빌드·배포 자동화로 확장된다.
-현재는 파이프라인을 직접 제출·재실행하는 단계이며, **블로그의 GitHub Actions 배포와 ML 워크로드의 CI/CD는 별개**다.
-다음 실험에서는 아래 흐름으로 품질 개선 효과부터 비교할 계획이다.
-
-```text
-오분류 분석 → 데이터·전처리·학습 설정 변경 → Kubeflow 재실행
-    → MLflow에서 기존 결과와 비교 → 후보 모델 선택 → 테스트·추론 검증
+```mermaid
+flowchart LR
+    A["오분류 분석"] --> B["데이터·설정 변경"] --> C["KFP 재실행"] --> D["MLflow 비교"]
+    D --> A
 ```
 
-각 실험에 사용한 데이터·코드·피처·모델의 출처를 남기고, 같은 평가 기준으로 이전 결과와 비교한다.
-검증 데이터에서 나아진 후보를 선택한 뒤, 별도로 남겨둔 테스트 데이터에서 최종 성능을 확인할 것이다.
+운영 API·모니터링·자동 재학습은 다음 범위다. 책의 GitLab CI·Argo CD·Prometheus·Grafana는 이 확장에 해당한다.
+블로그 자동 배포와 ML 파이프라인의 CI/CD는 별개다.
 
-**MLOps가 예측 성능을 저절로 높여주지는 않는다. 개선을 시도하고, 효과를 검증하고, 그 과정을 다시 실행할 수 있게 해준다.**
-이번에는 그 기반을 만들었다면, 다음에는 이를 이용해 부족한 예측 결과를 실제로 개선해보려 한다.
+??? note "참고"
 
----
-
-- 책 예제: [4장](https://github.com/practical-mlops/chapter-4), [5장](https://github.com/practical-mlops/chapter-5)
-
-- 도구 문서: [JupyterLab 노트북](https://jupyterlab.readthedocs.io/en/stable/user/notebook.html), [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/), [Kubeflow Pipelines](https://www.kubeflow.org/docs/components/pipelines/overview/)
+    - 책 예제: [4장](https://github.com/practical-mlops/chapter-4), [5장](https://github.com/practical-mlops/chapter-5)
+    - [JupyterLab](https://jupyterlab.readthedocs.io/en/stable/user/notebook.html) · [MLflow](https://mlflow.org/docs/latest/ml/tracking/) · [KFP](https://www.kubeflow.org/docs/components/pipelines/overview/)
