@@ -13,9 +13,9 @@ tags: [MLOps, Azure, MLflow, Feast, Kubeflow]
 
 | 장 | 핵심 내용 |
 |---|---|
-| 1. MLOps와 ML 엔지니어링 | 모델 개발부터 운영까지의 생애주기와 ML 플랫폼의 역할 |
-| 2. MLOps | 데이터·학습·배포·모니터링을 연결하는 반복 과정과 자동화 수준 |
-| 3. Kubernetes 기반 | 컨테이너로 실행 환경을 묶고 Kubernetes 위에서 작업을 배포·관리하는 방법 |
+| 1. MLOps와 ML 엔지니어링 | 실험에서 운영으로 이어지는 생애주기, 개발자와 플랫폼의 역할 |
+| 2. MLOps | DevOps와의 차이, 데이터 변화에 대응하는 반복 과정과 자동화 수준 |
+| 3. Kubernetes 기반 | Docker·Kubernetes 실행 기반에 CI/CD와 운영 모니터링을 연결 |
 | 4. 실험과 피처 관리 | MLflow로 실험·모델을 기록하고 Feast로 학습·추론용 피처를 관리하는 방법 |
 | 5. 파이프라인 오케스트레이션 | 작업과 데이터 전달을 DAG로 정의하고 Kubeflow Pipelines로 배치 추론을 자동화하는 방법 |
 
@@ -24,18 +24,25 @@ tags: [MLOps, Azure, MLflow, Feast, Kubeflow]
 ## MLOps와 전체 흐름
 
 **MLOps는 모델 개발과 운영을 연결하고, 데이터·코드·모델의 변경을 추적하며 실행·검증을 반복 가능하게 만드는 방법과 체계다.**
-도구 하나를 설치하는 것으로 완성되는 것은 아니다. 어떤 데이터와 설정으로 모델을 만들었고,
-무엇을 근거로 선택했으며, 운영 중 결과가 달라지면 어떻게 개선할지까지 연결해야 한다.
+코드가 같아도 학습 데이터가 달라지면 모델이 달라지고, 운영 입력의 변화로 성능이 떨어질 수 있다.
+그래서 MLOps는 DevOps의 빌드·배포에 더해 **데이터·모델·실험과 예측 품질**까지 관리한다.
 
-```text
-데이터 준비 → 탐색·학습 → 평가·모델 선택 → 배포·추론 → 모니터링
-     ↑                                               │
-     └────────── 새 데이터·문제 발견 → 개선·재학습 ──────┘
-```
+ML 개발자가 수행하는 일을 라이프사이클과 도구로 연결하면 다음과 같다.
 
-이번에는 이 전체 흐름 중 **데이터 준비 → 학습·평가 → 모델 저장 → 피처 조회 → 배치 추론**을 실습했다.
-소득 분류 예제로 MLflow·Feast·Kubeflow를 연결하고, 학습 실행과 추론 결과의 출처를 따라가는 것이 목표였다.
-운영 API 배포와 모니터링·자동 재학습은 이번 범위에 포함하지 않았다.
+| 단계 | 개발자가 하는 일 | 이번 실습의 실행·기록 방식 |
+|---|---|---|
+| 문제·데이터 준비 | 예측 대상과 평가 기준을 정하고 데이터를 준비 | 소득 분류 목표, 원본 CSV·피처 파일 확인 |
+| 탐색·실험 | 표·그래프로 데이터 확인, 전처리와 모델 설정 변경 | JupyterLab에서 셀 실행, MLflow에 분석 산출물 기록 |
+| 학습·평가 | 모델을 학습하고 같은 기준으로 비교·선택 | 노트북 또는 KFP 작업 Pod에서 실행, MLflow에 설정·점수·모델 기록 |
+| 반복 실행 | 검증한 코드를 작업으로 나누고 입력·순서 고정 | KFP SDK로 DAG 정의, Kubeflow에서 재실행 |
+| 배포·추론 | 선택한 모델과 새 입력을 연결해 예측 | Feast 피처 조회 → SeaweedFS 모델 로드 → 배치 추론 |
+| 관측·개선 | 오류·데이터 변화·품질 저하를 찾아 개선 | 이번에는 입력 공백 오류까지 확인. 운영 모니터링·자동 재학습은 다음 과제 |
+
+**JupyterLab은 실험하는 작업 공간, MLflow는 실행과 모델의 기록 체계, Kubeflow Pipelines는 작업의 실행 순서와 상태를 관리하는 체계**다.
+개발자가 셀을 실행하며 확인한 과정을 파이프라인으로 옮겨도, 학습·평가 로직과 MLflow 기록 코드는 재사용할 수 있다.
+
+실험에서는 유용한 모델을 찾고, 스테이징에서는 배포 후보를 검증하며, 프로덕션에서는 실제 요청을 처리하고 품질을 관측한다.
+이번에는 **학습·평가와 배치 추론의 연결**을 확인했다. 운영 API와 스테이징 승격 절차까지 구성한 것은 아니다.
 
 ## 환경과 도구의 역할
 
@@ -50,13 +57,13 @@ flowchart TB
         J["JupyterLab · Docker"]
         R["Redis · Docker"]
         subgraph K8s["kind Kubernetes"]
-            K["Kubeflow Pipelines"]
+            K["KFP UI·API<br/>공유 Workflow Controller"]
             P["학습·평가·추론 Pod<br/>추론에는 Feast SDK 포함"]
-            M["MLflow · 실행 기록과 모델 정보"]
+            M["MLflow Tracking Server<br/>UI·실행 기록·모델 정보"]
             S["SeaweedFS · 피처·모델·산출물"]
             DB["MLflow DB · PVC"]
             K -->|"작업 실행"| P
-            P -->|"기록·모델 정보 조회"| M
+            P -->|"MLflow SDK · 기록·조회"| M
             P <-->|"파일 직접 읽기·쓰기"| S
             M --> DB
         end
@@ -70,17 +77,28 @@ flowchart TB
     Browser --> Access
 ```
 
-JupyterLab과 Redis는 VM의 별도 Docker 컨테이너이며, 파이프라인 작업은 Kubernetes Pod에서 실행된다.
-**코드가 실행되는 곳은 Jupyter 커널 또는 작업 Pod이고, MLflow는 실행 기록을 관리하며 SeaweedFS는 파일을 보관한다.**
-추론 Pod의 Feast SDK는 SeaweedFS의 과거 피처를 조회한다. Redis는 노트북의 온라인 조회 실습에 사용했다.
+노트북 코드는 VM의 Jupyter 컨테이너 안 Python 커널에서, 파이프라인 코드는 Kubernetes 작업 Pod에서 실행된다.
+둘 다 MLflow SDK로 같은 Tracking Server에 기록한다. 서버는 설정·점수·모델 정보를 DB에 보관하고 UI로 보여준다.
+**이번 구성의 모델·산출물 파일은 클라이언트가 SeaweedFS에 직접 읽고 쓴다.** MLflow 서버가 학습·추론을 대신 실행하지는 않는다.
 
-전체 Kubeflow가 아닌 **Pipelines standalone** 구성이다. 실습 후에는 VM을 할당 해제하되 디스크는 보존했다.
+Kubeflow에서는 UI·API가 Run을 받고 공유 Workflow Controller와 실행 제어가 DAG를 진행시킨다.
+각 작업 Pod가 핵심 Python 함수를 실행하며, 그 코드가 MLflow에 결과를 남긴다.
+추론 Pod의 Feast SDK는 과거 피처를 조회하고, Redis는 노트북의 온라인 조회 실습에 사용했다.
+
+Kubernetes 관점에서는 **이미지**가 코드·의존성을 묶고 **Pod**가 실행한다.
+**Deployment**는 상시 서비스의 복제본을 유지하고 **Service**는 접속 주소를 제공한다.
+**ConfigMap·Secret**은 설정·비밀 전달, **PVC**는 영속 저장, 책에서 소개하는 **Helm**은 여러 리소스의 설치 구성을 묶는 도구다.
+전체 Kubeflow가 아닌 Pipelines standalone 구성으로, 실습 후 VM을 할당 해제하고 디스크는 보존했다.
 
 ## 1. 노트북에서 학습하고 MLflow로 비교하기
 
 소득 데이터 30,162행에서 직업·교육 등 범주형 피처 8개로 `>50K` 여부를 예측했다.
-데이터를 학습 80%·테스트 20%로 나누고, 원핫 인코딩 후 세 모델을 학습했다.
-실행별 파라미터·점수·모델과 분석 산출물은 MLflow에 기록했다.
+JupyterLab에서 **CSV 읽기 → EDA → 데이터 분할 → 전처리 → 세 모델 학습·평가**를 셀 단위로 실행했다.
+표와 그래프를 보며 입력을 이해하고, 학습 80%·테스트 20% 분할과 원핫 인코딩을 적용했다.
+
+JupyterLab은 코드·설명·출력을 함께 보는 화면이고, 셀의 Python 코드는 커널이 실행한다.
+`fit()`은 학습 라이브러리가 실행하며, MLflow 기록은 우리가 넣은 `log_*` 호출이 담당한다.
+셀 출력 전체가 저절로 MLflow에 저장되는 것은 아니다. 남길 그래프·표·데이터 정보·모델을 코드에서 지정했다.
 
 학습 코드에서 기록하는 부분은 다음과 같다. 아래 코드들은 실제 구현의 핵심만 발췌했으며, 초기화와 검증 코드는 생략했다.
 
@@ -91,7 +109,9 @@ with mlflow.start_run(run_name=model_name) as run:
     logged = mlflow.sklearn.log_model(model, name='model')
 ```
 
-점수는 평가 작업에서 같은 Run에 추가했다.
+MLflow의 **Experiment**는 같은 목적의 실험 묶음, **Run**은 개별 실행이다.
+노트북에서는 학습·평가·기록을 한 함수로 실행했고, 이후 KFP에서는 학습 작업이 저장한 Run에 평가 작업이 점수를 추가했다.
+개발자는 비교 결과를 보고 모델·파라미터를 선택한다. MLflow가 점수를 기록했다고 자동으로 모델을 고르는 것은 아니다.
 
 | 모델 | Accuracy | ROC-AUC | F1 |
 |---|---:|---:|---:|
@@ -111,20 +131,20 @@ with mlflow.start_run(run_name=model_name) as run:
 
 ## 2. Kubeflow로 반복 실행하기
 
-노트북을 그대로 올리는 대신, 코드를 Python 함수로 분리하고 KFP SDK로 작업을 연결했다.
+탐색 중에는 셀을 바꿔가며 실행하는 방식이 편했다. 반복할 절차가 정해진 뒤에는 준비·학습·평가 코드를 Python 함수로 분리하고 KFP SDK로 연결했다.
+개발자는 데이터·모델·평가 기준을 바꾸고, 플랫폼 측에서는 이미지·저장소·권한·실행 자원을 제공한다. 팀에 따라 이 역할을 같은 사람이 맡을 수도 있다.
 
 ```text
 데이터 준비 → 모델 학습·저장 → 평가 → 세 모델 비교
 ```
 
-정의를 YAML로 컴파일해 등록하면 Kubeflow가 작업 Pod에서 실행한다.
-학습 작업이 모델을 저장하고 평가 작업이 같은 MLflow Run에 점수를 추가하도록 구성했다.
-자원 부담을 줄이기 위해 세 모델은 순차 실행했다.
+KFP SDK는 이 연결을 YAML로 컴파일하고, 서버는 정의에 따라 작업 Pod를 실행한다.
+노트북에서 사람이 다음 셀을 눌렀던 실행 순서가 작업 간 의존성으로 바뀐 것이다. 자원 부담을 줄이기 위해 세 모델은 순차 실행했다.
 
 UI에서는 **Clone run → 파라미터 확인 → Start**로 다시 실행하고,
 그래프에서 진행 상태와 로그·산출물을 확인했다.
 
-**Kubeflow는 실행을 관리하고, MLflow는 그 실행의 기록과 모델을 관리한다.**
+**한 번의 학습·추론 실행 안에서 Kubeflow와 MLflow가 함께 사용된다. Kubeflow가 MLflow 기록을 읽어서 자동으로 학습을 개선하는 구조는 아니다.**
 
 <figure markdown="span">
 
@@ -313,7 +333,17 @@ Kubeflow로 같은 흐름을 반복 실행할 수 있게 만들었다.
 
 ## 다음 단계: MLOps로 개선을 반복하기
 
-앞으로는 이 흐름으로 개선 실험을 반복할 계획이다.
+실험 추적과 파이프라인 실행을 연결한 다음에는 운영으로 이어지는 자동화가 필요하다.
+
+| 보완할 영역 | 다음에 연결할 내용 |
+|---|---|
+| CI | 코드 변경 시 테스트 → 이미지 빌드 → 코드·이미지 버전 연결. 책에서는 GitLab CI를 다룬다 |
+| CD·GitOps | 검증한 파이프라인·서비스 배포 설정 반영과 복구. 책에서는 Argo CD를 다룬다 |
+| 모니터링 | Prometheus·Grafana로 오류·지연·자원 관측, 별도로 입력 변화와 예측 품질 확인 |
+
+자동화 수준은 수동 실행에서 학습 파이프라인 자동화, 파이프라인 자체의 빌드·배포 자동화로 확장된다.
+현재는 파이프라인을 직접 제출·재실행하는 단계이며, **블로그의 GitHub Actions 배포와 ML 워크로드의 CI/CD는 별개**다.
+다음 실험에서는 아래 흐름으로 품질 개선 효과부터 비교할 계획이다.
 
 ```text
 오분류 분석 → 데이터·전처리·학습 설정 변경 → Kubeflow 재실행
@@ -329,3 +359,5 @@ Kubeflow로 같은 흐름을 반복 실행할 수 있게 만들었다.
 ---
 
 - 책 예제: [4장](https://github.com/practical-mlops/chapter-4), [5장](https://github.com/practical-mlops/chapter-5)
+
+- 도구 문서: [JupyterLab 노트북](https://jupyterlab.readthedocs.io/en/stable/user/notebook.html), [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/), [Kubeflow Pipelines](https://www.kubeflow.org/docs/components/pipelines/overview/)
