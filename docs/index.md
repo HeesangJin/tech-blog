@@ -5,6 +5,13 @@
 
 ## 최근 글
 
+### MLOps 실습 2: 모델을 API로 배포하고 관측하기
+
+데이터 준비·학습·배포·모니터링을 연결했습니다. Airflow와 Kubeflow의 역할을 나누고,
+BentoML 예측 API와 Evidently의 실제 분포·결측값 분석 결과를 정리했습니다.
+
+[두 번째 실습 읽기 →](mlops/model-serving-monitoring.md){ .md-button .md-button--primary }
+
 ### MLOps 실습: 학습부터 추론까지 연결하기
 
 작은 소득 분류 예제로 노트북 실험을 파이프라인으로 옮기고, 피처 조회와 모델 저장,

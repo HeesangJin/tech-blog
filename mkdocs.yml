@@ -46,6 +46,7 @@ nav:
   - MLOps:
       - mlops/index.md
       - "MLOps 실습: 학습부터 추론까지 연결하기": mlops/azure-mlops-lab.md
+      - "MLOps 실습 2: 모델을 API로 배포하고 관측하기": mlops/model-serving-monitoring.md
   - 소개: about.md
 
 markdown_extensions:
