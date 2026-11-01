@@ -12,14 +12,15 @@ tags: [MLOps, Airflow, Feast, Kubeflow, MLflow, BentoML, Evidently, Gitea]
 
 ```mermaid
 flowchart LR
+    G["Gitea<br/>코드 저장"] --> X["Gitea Actions<br/>빌드·배포"]
     A["① 데이터 준비<br/>Airflow + Feast"]
     B["② 학습·평가<br/>Kubeflow"]
     C["③ 예측 API<br/>BentoML"]
     D["④ 입력 변화 확인<br/>Evidently"]
     A --> B
-    B -->|"선택 모델 배포"| C
+    B -->|"선택한 모델"| X
+    X --> C
     C -->|"요청 기록 수집"| D
-    D -.->|"개선할 때 다시"| A
 ```
 
 화살표는 업무의 순서다. **현재는 단계마다 사람이 결과를 확인하고 다음 작업을 수동 실행한다.**
@@ -33,6 +34,27 @@ flowchart LR
 | Gitea + Actions | 코드 보관, 컨테이너 이미지 빌드와 배포 |
 
 실행 환경은 기존 Azure VM과 kind Kubernetes를 계속 사용했다.
+
+## Git에는 무엇을 저장했나
+
+Gitea는 이번 실습의 Git 서버다. Actions는 여기에 저장한 서빙·분석 코드로 이미지를 만든다.
+
+<figure class="lab-shot" markdown="span">
+
+[![Gitea 저장소의 실제 폴더 목록. src, infra, ops, tests와 .gitea/workflows가 보인다](assets/model-serving-monitoring/gitea-source-files.jpg)](assets/model-serving-monitoring/gitea-source-files.jpg)
+
+<figcaption>Gitea · 코드를 저장한 곳. 모델 파일과 학습 데이터는 이 폴더 목록에 없다.</figcaption>
+</figure>
+
+| 폴더 | 저장한 것 |
+|---|---|
+| `src/` | 데이터 준비·학습·평가·분포 분석 Python 코드 |
+| `infra/` | Airflow DAG, Kubeflow 파이프라인, BentoML API, Dockerfile |
+| `ops/` | 이미지 빌드, Pod 교체, 배포 후 검사 코드 |
+| `tests/` | 데이터·API·배포 코드의 테스트 |
+| `.gitea/workflows/` | Actions에서 어떤 순서로 빌드하고 배포할지 적은 YAML |
+
+**코드는 Git 저장소, 컨테이너 이미지는 Gitea 레지스트리, 데이터와 모델 파일은 SeaweedFS에 저장했다.**
 
 ## ① 데이터 준비: Airflow와 Feast
 
@@ -75,6 +97,13 @@ Airflow와 Kubeflow는 모두 작업을 연결하고 실행한다. 이번에는 
 | 세 모델 학습 | 학습 데이터 → Decision Tree·Random Forest·XGBoost |
 | 평가·비교 | 검증 F1 비교 → 모델 선택 → 선택 모델만 테스트 평가 |
 
+<figure class="lab-shot" markdown="span">
+
+[![Kubeflow에서 피처 준비, 세 모델 학습, 검증 비교와 테스트 평가 작업이 모두 성공한 화면](assets/model-serving-monitoring/kubeflow-training-completed.jpg)](assets/model-serving-monitoring/kubeflow-training-completed.jpg)
+
+<figcaption>Kubeflow · 작업 세 개가 모두 끝났다. dataset은 준비한 데이터, models는 학습한 세 모델이다.</figcaption>
+</figure>
+
 첫 글에서는 학습·테스트를 80:20으로 나누고 테스트 점수로 모델까지 비교했다.
 이번에는 기존 테스트 행을 유지하고 학습 쪽에서 검증 데이터를 분리했다. 비율은 약 **학습 64% / 검증 16% / 테스트 20%**다.
 
@@ -83,18 +112,42 @@ MLflow에는 각 모델의 설정·점수, 비교 결과, 선택한 모델 ID와
 
 학습이 끝나면 MLflow에서 **`compare-and-select` 실행을 열고 Overview의 Run ID**를 복사한다. 다음 배포에서 이 값을 사용한다.
 
+<figure class="lab-shot" markdown="span">
+
+[![MLflow compare-and-select 실행의 Run ID와 선택된 학습 Run 연결이 표시된 화면](assets/model-serving-monitoring/mlflow-model-selection.jpg)](assets/model-serving-monitoring/mlflow-model-selection.jpg)
+
+<figcaption>MLflow · 가운데 Run ID를 복사한다. Gitea의 comparison_run_id 칸에 넣을 값이다.</figcaption>
+</figure>
+
 ## ③ 배포: Gitea Actions와 BentoML
 
 배치 작업이 끝날 때마다 Pod가 종료되는 방식에서, **모델을 메모리에 올려 두고 요청에 응답하는 API**로 확장했다.
 BentoML은 모델 로딩과 예측 코드를 API 서비스로 묶는 데 사용했다.
 
 먼저 Gitea의 **Build images (manual)**을 실행해 이미지를 만든다.
-이어서 **Deploy model (manual)**을 열고 두 값을 입력한다.
+
+<figure class="lab-shot" markdown="span">
+
+[![Gitea Actions 이미지 빌드 11번의 코드 검사, 이미지 빌드, 테스트, 레지스트리 저장이 성공한 화면](assets/model-serving-monitoring/gitea-image-build.jpg)](assets/model-serving-monitoring/gitea-image-build.jpg)
+
+<figcaption>Actions · 빌드 #11. 코드를 검사하고 이미지를 만든 뒤 테스트를 거쳐 레지스트리에 올렸다.</figcaption>
+</figure>
+
+이어서 **Deploy model (manual) → 워크플로 실행**을 열고 두 값을 입력한다.
 
 | 입력칸 | 넣는 값 |
 |---|---|
 | `image_tag` | 이미지 빌드가 끝난 로그에 나오는 `git-...` 태그 |
 | `comparison_run_id` | 앞에서 세 모델을 비교한 MLflow Run ID |
+
+<figure class="lab-shot" markdown="span">
+
+[![Gitea 수동 배포 입력창. 빌드한 이미지 태그와 MLflow 모델 비교 Run ID를 지정한다](assets/model-serving-monitoring/gitea-deployment-inputs.jpg)](assets/model-serving-monitoring/gitea-deployment-inputs.jpg)
+
+<figcaption>배포 입력창 · 위 칸은 실행할 코드 이미지, 아래 칸은 배포할 모델을 고르는 값이다.</figcaption>
+</figure>
+
+위 화면은 값을 입력한 상태다. 아래는 같은 이미지와 비교 Run을 사용해 앞서 완료한 **배포 #12**다.
 
 <figure class="lab-shot" markdown="span">
 
@@ -188,6 +241,16 @@ BentoML 요청·예측 기록 → SeaweedFS → Airflow 수동 분석 → MLflow
 보고서와 비교에 사용한 데이터·파일 해시도 보관했다.
 범주형 Jensen–Shannon 거리 0.1, 전체 피처 중 변화 비율 0.5를 판정 기준으로 설정했다. 이는 이 실습의 설정이다.
 
+<figure class="lab-shot" markdown="span">
+
+[![MLflow에서 연 Evidently 요약 보고서의 직업 분포 차트. 학습 기준은 파랑, 현재 요청은 주황으로 표시된다](assets/model-serving-monitoring/evidently-distribution-report.jpg)](assets/model-serving-monitoring/evidently-distribution-report.jpg)
+
+<figcaption>Evidently · 파랑은 학습 데이터, 주황은 모의 요청이다. 이 사례는 직업을 전부 Farming-fishing으로 바꿔 차이를 만들었다.</figcaption>
+</figure>
+
+Chrome에서 **Artifacts → monitoring → overview.html**을 열면 위 차트를 볼 수 있다.
+예를 들어 Farming-fishing 비율은 학습 데이터에서 약 3.3%, 이 모의 요청에서는 100%다.
+
 **드리프트는 오답이나 성능 저하를 뜻하지 않는다.** 정확도·F1은 정답 데이터가 있어야 평가할 수 있다.
 이번 분석은 입력의 변화와 누락을 발견해 다음 실험의 근거를 남기는 데 목적을 뒀다.
 
@@ -197,7 +260,7 @@ BentoML 요청·예측 기록 → SeaweedFS → Airflow 수동 분석 → MLflow
 |---|---|
 | 학습과 API의 입력 처리 차이 | 전처리와 모델을 함께 저장하고 배포 후 참조 예측과 비교 |
 | 온라인 요청이 아직 적음 | 최소 표본 수 미만이면 실패 대신 분석을 건너뜀 |
-| HTML 보고서 미리보기가 빈 화면 | MLflow Overview에서 지표 확인, HTML은 다운로드해서 열기 |
+| 앱 내 브라우저에서 HTML 미리보기가 빈 화면 | Chrome에서 열거나, HTML을 다운로드해서 확인 |
 
 여기까지는 API 응답과 입력의 변화를 확인했다.
 다음에는 요청에 정답을 붙여 어떤 경우에 틀렸는지 확인하고, 데이터를 추가해 다시 학습할 차례다.
