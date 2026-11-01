@@ -6,6 +6,7 @@ tags: [MLOps, Airflow, Feast, Kubeflow, MLflow, BentoML, Evidently, Gitea]
 
 지난 [첫 번째 실습](azure-mlops-lab.md)에서는 소득 분류 모델을 학습하고, 저장한 모델로 배치 추론을 실행했다.
 이번에는 **데이터 준비와 학습을 분리하고, 선택한 모델을 API로 배포한 뒤 입력 데이터의 변화까지 확인**했다.
+화면 이미지는 누르면 원본 크기로 볼 수 있다.
 
 ## 전체 흐름
 
@@ -22,6 +23,7 @@ flowchart LR
 ```
 
 화살표는 업무의 순서다. **현재는 단계마다 사람이 결과를 확인하고 다음 작업을 수동 실행한다.**
+준비된 데이터 주소는 학습 입력으로, 모델 비교 Run ID는 배포 입력으로 넘긴다.
 
 | 흐름을 받치는 도구 | 역할 |
 |---|---|
@@ -35,21 +37,30 @@ flowchart LR
 ## ① 데이터 준비: Airflow와 Feast
 
 처음에는 학습 코드에 CSV 읽기와 Feast 등록·조회가 섞여 있었다.
-데이터가 바뀔 때마다 다시 준비할 수 있도록 **피처 게시 작업을 별도 Airflow DAG로 분리**했다.
+데이터가 바뀔 때마다 다시 준비할 수 있도록 **데이터 준비 작업을 별도 Airflow DAG로 분리**했다. DAG는 작업과 실행 순서를 그린 것이다.
 
 ```text
 원본 검증 → 버전별 피처 파일·Feast 정의 게시 → 조회 검증·버전 확정
 ```
 
-| 순서 | 실제로 하는 일 |
-|---|---|
-| 원본 검증 | SeaweedFS에서 원본을 읽고 해시·스키마 확인 |
-| 피처 게시 | 버전별 데이터 스냅샷과 Feast registry 저장 |
-| 버전 확정 | Feast로 전체 조회가 되는지 확인하고 MLflow에 기록 |
+<figure class="lab-shot" markdown="span">
 
-이 DAG가 돌려주는 `manifest_uri`를 다음 Kubeflow 실행에 입력한다.
-**SeaweedFS에 저장한 JSON 파일의 주소**이며, 사용할 데이터와 Feast 정의·파일 해시를 묶어 설명한다.
-이 manifest는 실습에서 만든 연결 규약이다. Feast 자체가 모든 원본 데이터의 버전을 자동 관리하는 것은 아니다.
+[![Airflow에서 데이터 준비 작업 세 개가 모두 성공한 화면](assets/model-serving-monitoring/airflow-data-preparation.jpg)](assets/model-serving-monitoring/airflow-data-preparation.jpg)
+
+<figcaption>Airflow · 왼쪽부터 순서대로 실행했고, 상자 세 개가 모두 초록색 success로 끝났다.</figcaption>
+</figure>
+
+오른쪽 위 **트리거**로 수동 실행했다. 화면의 상자는 다음 일을 한다.
+
+| 화면의 상자 | 하는 일 |
+|---|---|
+| `ingest_inputs` | 원본을 읽고, 파일이 바뀌었는지와 필요한 열이 있는지 확인 |
+| `publish_definitions` | 데이터를 버전별로 저장하고 Feast에 파일 위치와 피처 정의 등록 |
+| `validate_promote` | Feast로 실제 읽어 본 뒤 사용할 버전을 확정하고 MLflow에 기록 |
+
+**다음 학습으로 넘길 값은 마지막 작업이 돌려준 `manifest_uri`다.**
+`validate_promote` 상자를 눌러 로그의 `manifest_uri`를 복사하고, Kubeflow의 같은 이름 입력칸에 붙여넣는다.
+사용할 데이터 파일과 Feast 정의가 적힌 JSON 파일의 주소다. 이 파일 형식은 실습에서 직접 정했다.
 
 Airflow와 Kubeflow는 모두 작업을 연결하고 실행한다. 이번에는 두 도구를 익히면서,
 데이터 게시와 모델 학습을 독립적으로 실행하기 위해 역할을 나눴다.
@@ -70,15 +81,31 @@ Airflow와 Kubeflow는 모두 작업을 연결하고 실행한다. 이번에는 
 MLflow에는 각 모델의 설정·점수, 비교 결과, 선택한 모델 ID와 데이터 버전을 연결했다.
 모델 파일은 SeaweedFS에 저장한다. 이번에 개선한 것은 **선택·평가 절차**이며, 이 변경만으로 예측 성능이 좋아졌다고 결론 내리지는 않았다.
 
+학습이 끝나면 MLflow에서 **`compare-and-select` 실행을 열고 Overview의 Run ID**를 복사한다. 다음 배포에서 이 값을 사용한다.
+
 ## ③ 배포: Gitea Actions와 BentoML
 
 배치 작업이 끝날 때마다 Pod가 종료되는 방식에서, **모델을 메모리에 올려 두고 요청에 응답하는 API**로 확장했다.
 BentoML은 모델 로딩과 예측 코드를 API 서비스로 묶는 데 사용했다.
 
-| 수동 Actions 작업 | 동작 |
+먼저 Gitea의 **Build images (manual)**을 실행해 이미지를 만든다.
+이어서 **Deploy model (manual)**을 열고 두 값을 입력한다.
+
+| 입력칸 | 넣는 값 |
 |---|---|
-| 이미지 빌드 | 소스 검사·테스트 → BentoML·분석 이미지 빌드 → Gitea 레지스트리에 저장 |
-| 모델 배포 | 이미지 태그 + 비교 Run ID 지정 → 선택 모델 확인 → 서빙 Pod 갱신·예측 검증 |
+| `image_tag` | 이미지 빌드가 끝난 로그에 나오는 `git-...` 태그 |
+| `comparison_run_id` | 앞에서 세 모델을 비교한 MLflow Run ID |
+
+<figure class="lab-shot" markdown="span">
+
+[![Gitea Actions 배포 12번의 모델 확인, BentoML Pod 교체, API 예측 검사가 성공한 화면](assets/model-serving-monitoring/gitea-deployment-success.jpg)](assets/model-serving-monitoring/gitea-deployment-success.jpg)
+
+<figcaption>Gitea Actions · 배포 #12. 모델 확인, 서빙 Pod 교체, API 예측 검사까지 성공했다.</figcaption>
+</figure>
+
+화면의 **Deliver image and update BentoML Pod**가 서버를 교체하는 단계다.
+그다음 **Verify prediction API and record deployment**에서 시험 요청을 보내 예상한 예측이 나오는지 확인했다.
+`Roll back on failure`는 실패가 없어 건너뛰었다.
 
 **코드를 push하거나 학습을 완료한 것만으로 배포되지는 않는다.** 배포할 비교 Run을 사람이 선택한다.
 Git에는 코드와 작업 정의를 저장하고, 데이터·모델 파일·인증값은 넣지 않았다.
@@ -94,6 +121,31 @@ Pod 시작: 고정된 S3 경로 → 모델 직접 다운로드·해시 확인 �
 
 검증에서는 같은 worker가 모델을 재사용하는지, 예측이 학습 시 참조 결과와 일치하는지 확인했다.
 배포 이력도 MLflow에 남겨 **데이터 버전 → 학습 → 비교·선택 → 배포 모델**을 따라갈 수 있게 했다.
+
+### 배포된 API에 직접 요청하기
+
+BentoML의 `/predict`를 펼치고 **Try it out**을 누른다.
+직업·교육 등 8개 값을 JSON에 넣고 **Execute**를 눌렀다.
+`collection_id`는 요청을 묶어 구분할 이름이다. 이번 요청에는 `blog-demo`를 넣었다.
+
+<figure class="lab-shot" markdown="span">
+
+[![BentoML predict 입력칸에 8개 피처와 blog-demo 요청 묶음을 입력한 화면](assets/model-serving-monitoring/bentoml-request.jpg)](assets/model-serving-monitoring/bentoml-request.jpg)
+
+<figcaption>BentoML · 입력을 작성한 화면. Execute를 누르면 배포된 모델에 요청이 전달된다.</figcaption>
+</figure>
+
+<figure class="lab-shot" markdown="span">
+
+[![BentoML predict의 실제 응답. HTTP 200과 소득 구간 예측, 모델 ID, 요청 기록 성공 여부가 표시된다](assets/model-serving-monitoring/bentoml-response.jpg)](assets/model-serving-monitoring/bentoml-response.jpg)
+
+<figcaption>BentoML · 같은 입력에 대한 실제 응답. 이 예시는 소득이 5만 달러를 넘는 구간으로 예측했다.</figcaption>
+</figure>
+
+- **`200`**: API 호출이 정상 처리됐다는 뜻이다. 정답을 맞혔다는 뜻은 아니다.
+- **`income: ">50K"`**: 모델이 예측한 소득 구간이다.
+- **`model_id`, `training_run_id`**: 어떤 모델과 학습에서 나온 예측인지 MLflow에서 찾는 값이다.
+- **`monitoring_logged: true`**: 이 요청과 예측을 SeaweedFS에 저장했다. 이렇게 모인 입력을 다음 Evidently 작업에서 비교한다.
 
 ## ④ 관측: Evidently로 무엇을 확인했나
 
@@ -147,8 +199,5 @@ BentoML 요청·예측 기록 → SeaweedFS → Airflow 수동 분석 → MLflow
 | 온라인 요청이 아직 적음 | 최소 표본 수 미만이면 실패 대신 분석을 건너뜀 |
 | HTML 보고서 미리보기가 빈 화면 | MLflow Overview에서 지표 확인, HTML은 다운로드해서 열기 |
 
-이번에는 **데이터 준비 → 학습·평가 → 모델 배포 → 입력 관측**을 한 바퀴 연결했다.
-각 도구를 붙이는 것보다 중요한 것은 **어떤 데이터와 모델로 실행했고, 무엇을 보고 다음 실험을 결정할지** 남기는 일이었다.
-
-다음에는 수집된 정답과 오분류 사례를 함께 보고 데이터·피처·학습 설정을 바꿔 비교할 수 있다.
-현재는 자동 스케줄·재학습·재배포를 켜지 않았으며, 변경과 다음 실행은 직접 결정한다.
+여기까지는 API 응답과 입력의 변화를 확인했다.
+다음에는 요청에 정답을 붙여 어떤 경우에 틀렸는지 확인하고, 데이터를 추가해 다시 학습할 차례다.
