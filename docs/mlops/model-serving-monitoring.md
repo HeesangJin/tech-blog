@@ -5,7 +5,7 @@ tags: [MLOps, Airflow, Feast, Kubeflow, MLflow, BentoML, Evidently, Gitea]
 ---
 
 지난 [첫 번째 실습](azure-mlops-lab.md)에서는 소득 분류 모델을 학습하고, 저장한 모델로 배치 추론을 실행했다.
-이번에는 모델을 API로 배포했다. 모의 요청을 보내 예측 응답을 확인하고, 학습 데이터와 다른 입력이 들어왔을 때 분포 차이를 잡아내는지도 살펴봤다.
+이번에는 사용자 ID로 예측하는 API를 만들었다. 공개 데이터로 모의 요청을 보내고, 정답을 붙여 재학습한 뒤 기존 모델과 비교했다.
 
 ## 개발부터 운영까지
 
@@ -18,7 +18,7 @@ tags: [MLOps, Airflow, Feast, Kubeflow, MLflow, BentoML, Evidently, Gitea]
 | [5. 데이터 준비](#step-5) | 원본 검사·정리, 학습에 사용할 데이터 버전 확정 | 학습 데이터 |
 | [6. 학습·평가](#step-6) | 후보 모델 학습, 검증 점수 비교, 선택 모델 테스트 | 선택한 모델·평가 결과 |
 | [7. 배포](#step-7) | 코드·모델 버전 선택, 배포 실행, 예측 호출 확인 | 예측 API |
-| [8. 예측·입력 점검](#step-8) | 예측 요청, 요청 기록 수집, 입력 분포·결측값 비교 | 예측 결과·입력 변화 보고서 |
+| [8. 예측·피드백](#step-8) | ID로 예측, 입력 분석·정답 수집, 재학습·모델 비교 | 교체 또는 유지 결정 |
 
 ## 전체 흐름
 
@@ -30,9 +30,11 @@ flowchart TB
     end
     subgraph RUN["학습과 운영"]
         direction LR
-        E["5. 데이터 준비"] --> F["6. 학습·평가"] --> G["7. 배포"] --> H["8. 예측·입력 점검"]
+        E["5. 데이터 준비"] --> F["6. 학습·평가"] --> G["7. 배포"] --> H["8. 예측·피드백"]
     end
     PREP --> RUN
+    H -->|정답·추가 데이터| E
+    F -->|기존 모델 유지| H
 ```
 
 ## 1. 개발 {#step-1}
@@ -68,13 +70,13 @@ JupyterLab에서 데이터를 살펴보고 세 모델을 학습했다. 노트북
 | 대상 | 이번 실습의 준비 방식 |
 |---|---|
 | 데이터 준비·학습 코드 | VM에서 빌드 명령 실행 후 kind 노드에 이미지 반영 |
-| 예측 API·입력 분석 코드 | Gitea의 **Build images (manual)** 실행 → 이미지 레지스트리에 저장 |
+| 예측 API·입력 분석·온라인 조회 코드 | Gitea의 **Build images (manual)** 실행 → 이미지 레지스트리에 저장 |
 
 <figure class="lab-shot" markdown="span">
 
 [![Gitea Actions 이미지 빌드 11번의 코드 검사, 이미지 빌드, 테스트, 레지스트리 저장이 성공한 화면](assets/model-serving-monitoring/gitea-image-build.jpg)](assets/model-serving-monitoring/gitea-image-build.jpg)
 
-<figcaption>빌드 #11. 코드 검사, 이미지 빌드, 테스트와 레지스트리 업로드까지 성공했다.</figcaption>
+<figcaption>초기 빌드 #11. 코드 검사부터 레지스트리 업로드까지 통과했다. 온라인 조회 기능을 추가한 뒤에도 같은 절차로 이미지를 다시 빌드했다.</figcaption>
 </figure>
 
 ## 4. 작업 등록 {#step-4}
@@ -125,7 +127,7 @@ Kubeflow는 전달받은 버전의 피처를 Feast로 조회한 뒤 학습과 �
 </figure>
 
 첫 글에서는 학습·테스트를 80:20으로 나누고 테스트 점수로 모델까지 비교했다.
-이번에는 학습 데이터에서 검증셋을 따로 떼어 모델 선택에 사용했다. 기존 테스트 행은 유지하고, 선택한 모델만 테스트했다. 비율은 약 **학습 64% / 검증 16% / 테스트 20%**다.
+초기 학습에서는 검증셋을 따로 떼어 모델 선택에 사용했다. 기존 테스트 행은 유지하고, 선택한 모델만 테스트했다. 비율은 약 **학습 64% / 검증 16% / 테스트 20%**다.
 
 MLflow에는 모델별 설정과 점수, 비교 결과, 선택한 모델 ID와 데이터 버전을 기록했다. 모델 파일은 SeaweedFS에 저장했다.
 
@@ -166,89 +168,123 @@ Gitea의 **Deploy model (manual)**에 이미지 태그와 비교 Run ID를 넣�
 ```
 
 **Pod가 SeaweedFS에서 모델을 내려받아 메모리에 올리고, 이후 요청에서는 같은 모델을 재사용한다.**
-문자열 정리와 원핫 인코더도 함께 저장해 학습 때와 같은 전처리를 적용했다. API는 사용자 ID 대신 8개 피처값을 직접 받도록 했다.
+문자열 정리와 원핫 인코더도 함께 저장해 학습 때와 같은 전처리를 적용했다. 처음 만든 `/predict`는 피처값 8개를 직접 받고, 이후 추가한 `/predict_by_id`는 ID로 피처를 조회한다.
 
 배포 후 시험 요청을 보내 학습 때의 참조 예측과 일치하는지 검사했다. 배포 이력은 MLflow에 기록해 어떤 데이터로 학습한 모델이 서비스 중인지 추적할 수 있게 했다.
 
-## 8. 예측·입력 점검 {#step-8}
+## 8. 예측·피드백 {#step-8}
 
-### 예측 요청
+### ID만 보내 예측하기
 
-BentoML의 `/predict`에서 **Try it out**을 눌러 8개 값을 JSON으로 입력했다.
-요청을 구분할 `collection_id`에는 `blog-demo`를 넣고 **Execute**로 예측을 요청했다.
-
-<figure class="lab-shot" markdown="span">
-
-[![BentoML predict 입력칸에 8개 피처와 blog-demo 요청 묶음을 입력한 화면](assets/model-serving-monitoring/bentoml-request.jpg)](assets/model-serving-monitoring/bentoml-request.jpg)
-
-<figcaption>/predict에 보낸 입력. collection_id는 나중에 분석할 요청들을 묶는 이름이다.</figcaption>
-</figure>
-
-<figure class="lab-shot" markdown="span">
-
-[![BentoML predict의 실제 응답. HTTP 200과 소득 구간 예측, 모델 ID, 요청 기록 성공 여부가 표시된다](assets/model-serving-monitoring/bentoml-response.jpg)](assets/model-serving-monitoring/bentoml-response.jpg)
-
-<figcaption>예측 응답. 소득 구간과 함께 모델 ID와 요청 기록 여부를 반환했다.</figcaption>
-</figure>
-
-- **`200`**: API 호출 성공. 예측의 정답 여부와는 별개다.
-- **`income: ">50K"`**: 모델이 예측한 소득 구간이다.
-- **`model_id`, `training_run_id`**: MLflow에서 모델과 학습 기록을 찾을 때 쓰는 ID다.
-- **`monitoring_logged: true`**: 요청과 예측 결과를 SeaweedFS에 저장했다는 뜻이다.
-
-### 입력 변화 확인
-
-저장한 요청은 Evidently로 분석했다. Airflow에서 분석 DAG를 실행하면 해당 모델의 학습 데이터와 요청 데이터를 비교하고, 보고서를 MLflow에 남긴다.
+Airflow의 **income_online_publication**으로 피처 스냅샷을 Redis에 적재했다.
+BentoML에 사용자 ID를 보내면 Feast 조회 서버가 그 사용자의 최신 적재값 8개를 읽고, BentoML이 모델에 넣어 예측한다.
 
 ```text
-BentoML 요청·예측 기록 → SeaweedFS → Airflow에서 Evidently 실행 → MLflow 지표·보고서
+사용자 ID → BentoML → Feast·Redis 조회 → 모델 예측
 ```
 
-| 비교 대상 | 이번 설정 |
-|---|---|
-| 기준 데이터 | 배포 모델을 학습한 Run의 학습 데이터 19,303행 |
-| 현재 데이터 | 해당 모델·요청 묶음의 최근 최대 1,000행 또는 지정한 배치 파일 |
-| 분석 범위 | 입력 8개 피처의 분포와 결측값 |
-| 표본이 적을 때 | 200행 미만이면 분석 건너뜀 |
+`/predict_by_id`에 넣은 값은 ID와 요청 묶음 이름뿐이다. 실습용으로 만든 가상 사용자 ID다.
 
-### 점검 결과
+```json
+{
+  "user_ids": ["9f2ac416-06e1-44a0-87bd-d4787c85bf66"],
+  "collection_id": "blog-online"
+}
+```
 
-분포 비교에는 공개 데이터로 만든 모의 입력을 1,000건씩 사용했다.
+<figure class="lab-shot" markdown="span">
 
-| 사례 | 만든 입력 | 분석 결과 |
+[![BentoML predict_by_id 입력창. 사용자 ID와 요청 묶음 이름을 입력했다](assets/model-serving-monitoring/bentoml-id-request.jpg)](assets/model-serving-monitoring/bentoml-id-request.jpg)
+
+<figcaption>ID로 예측 요청. 직업·학력 등 피처값은 요청에 넣지 않았다.</figcaption>
+</figure>
+
+<figure class="lab-shot" markdown="span">
+
+[![HTTP 200 응답의 online_features에 조회한 8개 피처와 온라인 데이터 버전이 표시된 화면](assets/model-serving-monitoring/bentoml-id-response.jpg)](assets/model-serving-monitoring/bentoml-id-response.jpg)
+
+<figcaption>응답의 online_features에는 모델에 넣은 실제 피처값과 조회한 스냅샷 버전이 들어 있다.</figcaption>
+</figure>
+
+모델은 그대로 두고, 같은 ID의 직업·학력 등 여러 피처를 갱신한 뒤 다시 요청했다.
+
+| 확인한 값 | 갱신 전 | 갱신 후 |
 |---|---|---|
-| 정상 분포 | 기준 데이터에서 표본 추출 | 드리프트 0 / 8개 |
-| 분포 변화 | 직업·교육 등 6개 피처의 구성을 의도적으로 변경 | 드리프트 6 / 8개 |
-| 결측값 | 직업 값 600개를 비운 별도 배치 | 직업 결측률 60% 확인 |
+| 직업 | Adm-clerical | Craft-repair |
+| 학력 | Bachelors | HS-grad |
+| 연소득 >50K 예측 확률 | 6.1% | 25.3% |
 
-API는 누락·빈값을 거절하므로, 결측값 사례는 **별도 배치 파일**로 분석했다. 이 배치는 드리프트 0개로 나왔지만, 직업 값이 60% 비어 있다는 문제는 별도로 확인됐다.
+모델의 학습 데이터 버전과 온라인 피처 버전은 따로 기록했다. 새 피처를 적재한 것만으로 모델이 재학습되지는 않는다.
+없는 ID는 오류로 반환했고, 성공한 요청은 `request_id`와 함께 SeaweedFS에 저장했다.
+
+### 모인 요청의 분포 확인
+
+[UCI Adult](https://archive.ics.uci.edu/dataset/2/adult)의 `adult.test`에서 Craft-repair 직업군의 관측값을 골라 가상 사용자 600명에게 배정했다.
+기존 학습 데이터보다 특정 직업군의 요청이 많아진 상황을 흉내 냈다.
+
+Airflow의 **income_model_monitoring**으로 이 요청들을 분석했다.
+
+| 비교·분석 항목 | 결과 |
+|---|---:|
+| 기준: 배포 모델의 학습 데이터 | 19,303행 |
+| 비교: ID로 예측한 요청 | 600행 |
+| 분포 변화 감지 | 8개 중 7개 피처 |
+| 결측값 | 0개 |
 
 <figure class="lab-shot" markdown="span">
 
-[![MLflow에 기록된 분포 변화 분석 결과. 기준 19,303행과 모의 요청 1,000행을 비교해 6개 피처의 변화를 감지했다.](assets/model-serving-monitoring/mlflow-drift-summary.jpg)](assets/model-serving-monitoring/mlflow-drift-summary.jpg)
+[![MLflow의 실제 온라인 요청 분석 결과. 기준 19303행과 요청 600행을 비교해 7개 피처의 변화를 감지했다](assets/model-serving-monitoring/mlflow-online-drift.jpg)](assets/model-serving-monitoring/mlflow-online-drift.jpg)
 
-<figcaption>MLflow에 남긴 분석 결과. 8개 피처 중 6개의 분포 변화가 감지됐다.</figcaption>
+<figcaption>요청 600건의 분석 기록. drifted_feature_count는 7, drift_share는 0.875다.</figcaption>
 </figure>
-
-보고서와 함께 비교에 쓴 데이터와 파일 해시도 보관했다. 판정 기준은 범주형 Jensen–Shannon 거리 0.1, 변화가 감지된 피처 비율 0.5로 설정했다.
 
 <figure class="lab-shot" markdown="span">
 
-[![MLflow에서 연 Evidently 요약 보고서의 직업 분포 차트. 학습 기준은 파랑, 현재 요청은 주황으로 표시된다](assets/model-serving-monitoring/evidently-distribution-report.jpg)](assets/model-serving-monitoring/evidently-distribution-report.jpg)
+[![실제 요청의 직업 분포 비교. Craft-repair 비율이 학습 데이터 13.5퍼센트에서 모의 요청 100퍼센트로 달라졌다](assets/model-serving-monitoring/evidently-online-distribution.jpg)](assets/model-serving-monitoring/evidently-online-distribution.jpg)
 
-<figcaption>직업 분포 비교. 파랑은 학습 데이터, 주황은 모의 요청이다.</figcaption>
+<figcaption>Evidently 결과로 만든 정적 요약. 파랑은 학습 데이터, 주황은 이번 요청이다. Craft-repair 비율이 13.5% → 100%로 달라졌다.</figcaption>
 </figure>
 
-MLflow의 **Artifacts → monitoring → overview.html**에서 연 차트다. Farming-fishing 비율은 학습 데이터에서 약 3.3%였고, 이 모의 요청에서는 차이를 만들기 위해 100%로 바꿨다.
+보고서와 비교 데이터, 원본 파일 해시를 함께 보관했다. 분포 판정 기준은 범주형 Jensen–Shannon 거리 0.1, 변화가 감지된 피처 비율 0.5로 설정했다.
 
-분포가 달라졌다는 결과만으로 예측이 틀렸다고 볼 수는 없다. 정확도와 F1은 정답 데이터를 붙여 확인해야 한다.
+### 정답을 붙여 다시 학습하기
+
+분포가 달라졌다는 것만으로 예측 성능을 알 수는 없다. 공개 데이터에 이미 있는 정답을 별도로 전달해, 예측 후 정답을 확보하는 상황을 흉내 냈다.
+**요청 당시 저장한 피처에 `request_id`와 행 위치로 정답을 붙였다.**
+
+| 실행 순서 | 한 일 | 결과 |
+|---|---|---|
+| Airflow · 피드백 준비 | 요청·정답 결합, 현재 예측 평가, 300명씩 분리 | 학습용 300명·비교용 300명 |
+| Airflow · 데이터 게시 | 학습용 300명만 기존 데이터에 추가 | 새 Feast 학습 스냅샷 |
+| Kubeflow · 재학습 | 같은 검증셋으로 세 모델 비교 | XGBoost 선택 |
+| Airflow · 모델 재검토 | 남겨둔 300명에 기존·새 모델로 예측 | 같은 입력에 대한 점수 비교 |
+
+학습 행은 **19,303 → 19,603**으로 늘었다. 기존 검증 4,826행·테스트 6,033행은 그대로 유지했고, 비교용 300명도 학습에서 제외했다.
+
+### 재학습 전후 비교
+
+| 평가 데이터 · F1 | 기존 모델 | 재학습 모델 |
+|---|---:|---:|
+| 학습에서 제외한 새 사용자 300명 | 0.167 | 0.189 |
+| 기존 검증셋 4,826행 | 0.615 | 0.612 |
+
+<figure class="lab-shot" markdown="span">
+
+[![MLflow에서 같은 새 사용자 300명과 기존 검증셋의 F1을 기존·재학습 모델로 비교한 기록](assets/model-serving-monitoring/mlflow-feedback-comparison.jpg)](assets/model-serving-monitoring/mlflow-feedback-comparison.jpg)
+
+<figcaption>current는 기존 모델, candidate는 재학습 모델이다. original_validation은 기존 검증셋 점수다.</figcaption>
+</figure>
+
+새 사용자에서는 F1이 조금 올랐지만 기존 검증셋에서는 내려갔다. **이번에는 서비스 모델을 유지했다.**
+MLflow에 `promotion_decision=keep_current`와 이유를 남기고, 유지한 모델로 다시 ID 예측을 보내 요청 저장까지 확인했다.
 
 ## 막혔던 부분
 
 | 문제 | 처리 |
 |---|---|
 | 학습과 API의 입력 처리 차이 | 전처리와 모델을 함께 저장하고 배포 후 참조 예측과 비교 |
+| Feast와 서빙 라이브러리의 버전 차이 | Feast 조회 서버를 분리하고 BentoML과 HTTP로 연결 |
 | 온라인 요청이 아직 적음 | 최소 표본 수 미만이면 실패 대신 분석을 건너뜀 |
 | 앱 내 브라우저에서 HTML 미리보기가 빈 화면 | Chrome에서 열거나, HTML을 다운로드해서 확인 |
 
-학습한 모델을 API로 배포하고, 들어온 입력을 다시 분석하는 데까지 연결했다. 다음에는 예측에 정답을 붙여 어떤 경우에 틀리는지 확인하고, 그 결과를 다음 학습에 반영해 보려 한다.
+이번에는 예측 결과를 다음 학습에 반영하고, 기존 모델을 유지하는 결정까지 기록했다. 다음 실험에서는 틀린 사례를 살펴보고 피처와 데이터 구성을 보완해, 두 평가에서 함께 개선되는지 확인하려 한다.
