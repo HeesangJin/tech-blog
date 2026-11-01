@@ -8,23 +8,43 @@ tags: [MLOps, Airflow, Feast, Kubeflow, MLflow, BentoML, Evidently, Gitea]
 이번에는 **데이터 준비와 학습을 분리하고, 선택한 모델을 API로 배포한 뒤 입력 데이터의 변화까지 확인**했다.
 화면 이미지는 누르면 원본 크기로 볼 수 있다.
 
+## 코드 작성부터 운영까지, 진행 순서
+
+실습에서는 노트북과 파이프라인을 먼저 만들고, 나중에 코드를 Gitea로 옮겨 Actions를 붙였다.
+아래는 **완성한 구성으로 작업할 때의 순서**다. 실제로 수동 처리한 부분도 함께 적었다.
+
+1. **코드를 개발한다.** JupyterLab에서 데이터를 살펴보고 학습을 시험한다. 반복할 데이터 준비·학습·평가 과정을 Python 파일로 정리하고, API와 입력 분석 코드를 작성한다.
+
+2. **코드를 Gitea에 저장한다.** 학습·평가 코드를 포함해 DAG, API, Dockerfile, 테스트, Actions YAML을 commit·push한다. 데이터와 모델 파일은 SeaweedFS에 둔다.
+
+3. **코드와 라이브러리를 이미지로 묶는다.** 데이터 준비·학습 이미지는 VM에서 수동 빌드해 kind 노드에 넣었다. BentoML·Evidently 이미지는 수동 Actions로 빌드해 Gitea 레지스트리에 올렸다.
+
+4. **데이터 준비·학습 작업을 등록한다.** Airflow에는 DAG 파일을 반영한다. Kubeflow는 SDK 코드를 YAML로 컴파일해 등록한다. 각 작업이 사용할 이미지도 지정한다. 이 등록은 수동으로 했다.
+
+5. **학습할 데이터를 준비한다.** Airflow를 수동 실행해 원본 검사, SeaweedFS 버전별 저장, Feast 정의 등록을 수행한다. 결과로 받은 `manifest_uri`가 학습에 넘길 데이터 버전의 주소다.
+
+6. **학습·평가를 실행한다.** Kubeflow에 `manifest_uri`를 넣고 실행한다. Feast로 피처를 조회해 세 모델을 학습하고, 검증셋으로 고른 모델을 테스트한다. 실행 기록은 MLflow에, 모델 파일은 SeaweedFS에 남긴다.
+
+7. **선택한 모델을 배포한다.** Actions 배포 작업에 `image_tag`와 MLflow의 `comparison_run_id`를 넣고 수동 실행한다. BentoML Pod가 SeaweedFS에서 해당 모델을 받아 로딩하고, 시험 예측을 통과하는지 확인한다.
+
+8. **요청을 받고 입력 변화를 확인한다.** BentoML의 요청·예측 기록을 SeaweedFS에 쌓는다. 기록이 모이면 Airflow에서 Evidently를 수동 실행해 분포·결측값을 비교하고 MLflow에 결과를 남긴다.
+
+**Git에 코드를 올리는 것과 그 코드가 실행 환경에 반영되는 것은 별개다.** 코드를 바꾸면 해당 이미지를 다시 만들고, 작업이나 배포가 새 이미지를 사용하도록 갱신해야 한다.
+
 ## 전체 흐름
 
 ```mermaid
 flowchart LR
-    G["Gitea<br/>코드 저장"] --> X["Gitea Actions<br/>빌드·배포"]
-    A["① 데이터 준비<br/>Airflow + Feast"]
-    B["② 학습·평가<br/>Kubeflow"]
-    C["③ 예측 API<br/>BentoML"]
-    D["④ 입력 변화 확인<br/>Evidently"]
-    A --> B
-    B -->|"선택한 모델"| X
-    X --> C
-    C -->|"요청 기록 수집"| D
+    G["코드 개발·저장<br/>Jupyter · Gitea"]
+    I["이미지 준비<br/>VM 수동 · Actions"]
+    R["작업 등록·실행<br/>Airflow · Kubeflow"]
+    S["선택 모델 배포<br/>Actions · BentoML"]
+    M["입력 분석<br/>Evidently"]
+    G --> I --> R --> S --> M
 ```
 
-화살표는 업무의 순서다. **현재는 단계마다 사람이 결과를 확인하고 다음 작업을 수동 실행한다.**
-준비된 데이터 주소는 학습 입력으로, 모델 비교 Run ID는 배포 입력으로 넘긴다.
+**현재는 단계마다 사람이 결과를 확인하고 다음 작업을 수동 실행한다.**
+데이터 버전의 주소는 학습 입력으로, 모델 비교 Run ID는 배포 입력으로 넘긴다.
 
 | 흐름을 받치는 도구 | 역할 |
 |---|---|
@@ -37,7 +57,8 @@ flowchart LR
 
 ## Git에는 무엇을 저장했나
 
-Gitea는 이번 실습의 Git 서버다. Actions는 여기에 저장한 서빙·분석 코드로 이미지를 만든다.
+Gitea는 이번 실습의 Git 서버다. 데이터 준비·학습·평가·서빙·분석 코드가 같은 저장소에 있다.
+현재 Actions에 연결한 이미지 빌드 범위는 서빙·분석 코드다.
 
 <figure class="lab-shot" markdown="span">
 
