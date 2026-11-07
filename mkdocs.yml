@@ -47,6 +47,7 @@ nav:
       - mlops/index.md
       - "MLOps 실습: 학습부터 추론까지 연결하기": mlops/azure-mlops-lab.md
       - "MLOps 실습 2: 학습한 모델을 서비스로 만들기": mlops/model-serving-monitoring.md
+      - "MLOps 실습 3: 학습·검증 파이프라인 구성하기": mlops/data-training-registry.md
   - 소개: about.md
 
 markdown_extensions:

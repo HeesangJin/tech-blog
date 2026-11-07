@@ -5,6 +5,13 @@
 
 ## 최근 글
 
+### MLOps 실습 3: 학습·검증 파이프라인 구성하기
+
+학습·검증 단계 내부를 구성했습니다. 데이터 분리, Artifact와 PVC의 파일 공유 방식,
+Harbor 이미지 버전 고정, 검증 점수에 따른 모델 선택을 실제 실행 화면으로 정리했습니다.
+
+[세 번째 실습 읽기 →](mlops/data-training-registry.md){ .md-button .md-button--primary }
+
 ### MLOps 실습 2: 학습한 모델을 서비스로 만들기
 
 데이터 준비·학습·배포·모니터링을 연결했습니다. Airflow와 Kubeflow의 역할을 나누고,
