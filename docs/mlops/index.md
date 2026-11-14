@@ -2,6 +2,10 @@
 
 모델을 학습하는 코드에서 출발해, 실행과 데이터·모델의 출처를 연결하는 과정을 기록합니다.
 
+- [MLOps 실습 4 · llm-d의 Prefix Cache 라우팅은 언제 빨라질까?](llm-d-prefix-cache-routing.md)
+
+    Round Robin과 캐시를 고려한 라우팅을 네 가지 요청 패턴에서 비교했습니다.
+
 - [MLOps 실습 3: 학습·검증 파이프라인 구성하기](data-training-registry.md) · 2026-11-08
 
     신분증·영화 데이터 준비, Harbor 이미지 전환, YOLO 학습·검증과 추천 모델 등록을 진행했습니다.

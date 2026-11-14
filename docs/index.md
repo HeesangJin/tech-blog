@@ -5,6 +5,12 @@
 
 ## 최근 글
 
+### MLOps 실습 4 · llm-d의 Prefix Cache 라우팅은 언제 빨라질까?
+
+같은 vLLM 환경에서 라우팅만 바꿔 요청 패턴별 처리량과 응답 시간(p90·p99)을 비교했습니다.
+
+[네 번째 실습 읽기 →](mlops/llm-d-prefix-cache-routing.md){ .md-button .md-button--primary }
+
 ### MLOps 실습 3: 학습·검증 파이프라인 구성하기
 
 학습·검증 단계 내부를 구성했습니다. 데이터 분리, Artifact와 PVC의 파일 공유 방식,
